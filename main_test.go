@@ -570,6 +570,227 @@ func TestOldHistoryNoSessionID(t *testing.T) {
 	}
 }
 
+// ── Phase 3 tests ──────────────────────────────────────────────────────────
+
+// TestStatuslineWrite verifies that after recordTokens, ctx.json is written with correct fields.
+func TestStatuslineWrite(t *testing.T) {
+	cleanup := withTempCache(t)
+	defer cleanup()
+
+	tmp := t.TempDir()
+	statePath := filepath.Join(tmp, "ctx.json")
+	os.Setenv("CTX_STATUSLINE_PATH", statePath)
+	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+
+	recordTokens(284391, 18204, "/v1/messages")
+	time.Sleep(20 * time.Millisecond)
+
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ctx.json not written: %v", err)
+	}
+	var state StatuslineState
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("bad ctx.json: %v", err)
+	}
+	if state.InputTokens != 284391 {
+		t.Errorf("InputTokens = %d, want 284391", state.InputTokens)
+	}
+	if state.OutputTokens != 18204 {
+		t.Errorf("OutputTokens = %d, want 18204", state.OutputTokens)
+	}
+	if state.Requests != 1 {
+		t.Errorf("Requests = %d, want 1", state.Requests)
+	}
+	if state.SessionID == "" {
+		t.Error("SessionID should not be empty")
+	}
+	if state.UpdatedAt.IsZero() {
+		t.Error("UpdatedAt should not be zero")
+	}
+	expectedCost := float64(284391)/1_000_000*inputPriceMtok + float64(18204)/1_000_000*outputPriceMtok
+	if state.CostUSD < expectedCost-0.01 || state.CostUSD > expectedCost+0.01 {
+		t.Errorf("CostUSD = %.4f, want ~%.4f", state.CostUSD, expectedCost)
+	}
+}
+
+// TestStatuslineAtomic verifies that no .tmp file is left behind after write.
+func TestStatuslineAtomic(t *testing.T) {
+	cleanup := withTempCache(t)
+	defer cleanup()
+
+	tmp := t.TempDir()
+	statePath := filepath.Join(tmp, "ctx.json")
+	os.Setenv("CTX_STATUSLINE_PATH", statePath)
+	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+
+	recordTokens(1000, 100, "/v1/messages")
+	time.Sleep(20 * time.Millisecond)
+
+	// No .tmp file should remain.
+	if _, err := os.Stat(statePath + ".tmp"); !os.IsNotExist(err) {
+		t.Error(".tmp file should not exist after atomic write")
+	}
+	// ctx.json should exist.
+	if _, err := os.Stat(statePath); err != nil {
+		t.Errorf("ctx.json should exist: %v", err)
+	}
+}
+
+// TestStatuslineCmd verifies the compact output format.
+func TestStatuslineCmd(t *testing.T) {
+	cleanup := withTempCache(t)
+	defer cleanup()
+
+	tmp := t.TempDir()
+	statePath := filepath.Join(tmp, "ctx.json")
+	os.Setenv("CTX_STATUSLINE_PATH", statePath)
+	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+
+	state := StatuslineState{
+		InputTokens:  284391,
+		OutputTokens: 18204,
+		Requests:     38,
+		CostUSD:      1.13,
+		SessionID:    "1744048320",
+		UpdatedAt:    time.Now().UTC(),
+	}
+	data, _ := json.Marshal(state)
+	os.WriteFile(statePath, data, 0o644)
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	cmdStatusline([]string{})
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	output := strings.TrimSpace(string(out))
+
+	// Expected: ⬡ 284k in · 18k out · $1.13
+	if !strings.Contains(output, "284k") {
+		t.Errorf("output missing 284k: %q", output)
+	}
+	if !strings.Contains(output, "18k") {
+		t.Errorf("output missing 18k: %q", output)
+	}
+	if !strings.Contains(output, "$1.13") {
+		t.Errorf("output missing $1.13: %q", output)
+	}
+}
+
+// TestStatuslineCmdJSON verifies --json flag prints raw JSON.
+func TestStatuslineCmdJSON(t *testing.T) {
+	cleanup := withTempCache(t)
+	defer cleanup()
+
+	tmp := t.TempDir()
+	statePath := filepath.Join(tmp, "ctx.json")
+	os.Setenv("CTX_STATUSLINE_PATH", statePath)
+	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+
+	state := StatuslineState{
+		InputTokens:  1000,
+		OutputTokens: 100,
+		Requests:     1,
+		CostUSD:      0.01,
+		SessionID:    "123",
+		UpdatedAt:    time.Now().UTC(),
+	}
+	data, _ := json.Marshal(state)
+	os.WriteFile(statePath, data, 0o644)
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	cmdStatusline([]string{"--json"})
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+
+	var parsed StatuslineState
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatalf("--json output is not valid JSON: %v\noutput: %s", err, out)
+	}
+	if parsed.SessionID != "123" {
+		t.Errorf("parsed SessionID = %q, want 123", parsed.SessionID)
+	}
+}
+
+// TestStatuslineDisabled verifies that CTX_STATUSLINE_PATH="" skips write entirely.
+func TestStatuslineDisabled(t *testing.T) {
+	cleanup := withTempCache(t)
+	defer cleanup()
+
+	os.Setenv("CTX_STATUSLINE_PATH", "")
+	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+
+	// Should not panic or write anything.
+	recordTokens(500, 50, "/v1/messages")
+	time.Sleep(20 * time.Millisecond)
+
+	// Verify statuslinePath returns "".
+	if p := statuslinePath(); p != "" {
+		t.Errorf("expected empty path, got %q", p)
+	}
+}
+
+// TestStatuslineStale verifies that stale data (>35 min) prints nothing.
+func TestStatuslineStale(t *testing.T) {
+	cleanup := withTempCache(t)
+	defer cleanup()
+
+	tmp := t.TempDir()
+	statePath := filepath.Join(tmp, "ctx.json")
+	os.Setenv("CTX_STATUSLINE_PATH", statePath)
+	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+
+	state := StatuslineState{
+		InputTokens:  1000,
+		OutputTokens: 100,
+		Requests:     1,
+		CostUSD:      0.01,
+		SessionID:    "123",
+		UpdatedAt:    time.Now().UTC().Add(-40 * time.Minute), // stale
+	}
+	data, _ := json.Marshal(state)
+	os.WriteFile(statePath, data, 0o644)
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	cmdStatusline([]string{})
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if len(strings.TrimSpace(string(out))) > 0 {
+		t.Errorf("stale data should print nothing, got: %q", string(out))
+	}
+}
+
+// TestFmtCompact verifies compact number formatting.
+func TestFmtCompact(t *testing.T) {
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1k"},
+		{1499, "1k"},
+		{1500, "2k"},
+		{284391, "284k"},
+		{1_000_000, "1M"},
+		{1_500_000, "2M"},
+		{2_000_000, "2M"},
+	}
+	for _, c := range cases {
+		if got := fmtCompact(c.n); got != c.want {
+			t.Errorf("fmtCompact(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
 // ── session gap test ───────────────────────────────────────────────────────
 
 func TestSessionGapReset(t *testing.T) {

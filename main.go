@@ -81,6 +81,63 @@ func saveSession(s *Session) {
 	_ = os.WriteFile(sessionFile(), data, 0o644)
 }
 
+// ── Statusline state file ───────────────────────────────────────────────────
+
+// StatuslineState is the schema of ~/.files/states/ctx.json.
+type StatuslineState struct {
+	InputTokens  int64     `json:"input_tokens"`
+	OutputTokens int64     `json:"output_tokens"`
+	Requests     int       `json:"requests"`
+	CostUSD      float64   `json:"cost_usd"`
+	SessionID    string    `json:"session_id"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func statuslinePath() string {
+	if v, ok := os.LookupEnv("CTX_STATUSLINE_PATH"); ok {
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".files", "states", "ctx.json")
+}
+
+func writeStatusline(s *Session) {
+	path := statuslinePath()
+	if path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("statusline: cannot create dir %s: %v", dir, err)
+		return
+	}
+	cost := float64(s.InputTokens)/1_000_000*inputPriceMtok + float64(s.OutputTokens)/1_000_000*outputPriceMtok
+	state := StatuslineState{
+		InputTokens:  s.InputTokens,
+		OutputTokens: s.OutputTokens,
+		Requests:     s.Requests,
+		CostUSD:      cost,
+		SessionID:    s.SessionID,
+		UpdatedAt:    time.Now().UTC(),
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		log.Printf("statusline: write tmp: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("statusline: rename: %v", err)
+		_ = os.Remove(tmp)
+	}
+}
+
 func appendHistory(e HistoryEntry) {
 	if err := os.MkdirAll(cacheBase(), 0o755); err != nil {
 		return
@@ -114,6 +171,7 @@ func recordTokens(input, output int64, path string) {
 	session.LastRequestAt = now
 
 	saveSession(session)
+	writeStatusline(session)
 	appendHistory(HistoryEntry{SessionID: session.SessionID, TS: now, Input: input, Output: output, Path: path})
 }
 
@@ -403,6 +461,55 @@ func readHistory() []HistoryEntry {
 	return entries
 }
 
+// ── Statusline CLI ─────────────────────────────────────────────────────────
+
+func fmtCompact(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%dM", (n+500_000)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%dk", (n+500)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
+func cmdStatusline(args []string) {
+	fs := flag.NewFlagSet("statusline", flag.ExitOnError)
+	jsonOut := fs.Bool("json", false, "print raw JSON")
+	fs.Parse(args)
+
+	path := statuslinePath()
+	if path == "" {
+		return
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // file missing — print nothing
+	}
+
+	if *jsonOut {
+		fmt.Print(string(data))
+		return
+	}
+
+	var state StatuslineState
+	if json.Unmarshal(data, &state) != nil {
+		return
+	}
+
+	// Stale check: >35 min ago.
+	if time.Since(state.UpdatedAt) > 35*time.Minute {
+		return
+	}
+
+	fmt.Printf("⬡ %s in · %s out · $%.2f\n",
+		fmtCompact(state.InputTokens),
+		fmtCompact(state.OutputTokens),
+		state.CostUSD)
+}
+
 func fmtInt(n int) string    { return fmtInt64(int64(n)) }
 func fmtInt64(n int64) string {
 	s := strconv.FormatInt(n, 10)
@@ -439,6 +546,9 @@ func main() {
 			return
 		case "history":
 			cmdHistory(os.Args[2:])
+			return
+		case "statusline":
+			cmdStatusline(os.Args[2:])
 			return
 		}
 	}
