@@ -21,6 +21,6 @@ total_budget_usd: 20.00
 warn_at_pct: 80
 
 hooks:
-  on_fail: ""
-  on_done: ""
-  on_all_done: ""
+  on_fail: "osascript -e 'display notification \"Task $TASK_ID failed\" with title \"claude-context-proxy\" subtitle \"FAIL\"'"
+  on_done: "osascript -e 'display notification \"Task $TASK_ID done\" with title \"claude-context-proxy\" subtitle \"$STATUS\"'"
+  on_all_done: "osascript -e 'display notification \"All tasks complete\" with title \"claude-context-proxy\"'"
