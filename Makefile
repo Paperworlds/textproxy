@@ -12,6 +12,7 @@ run: build
 install: build
 	mkdir -p $(HOME)/.local/bin
 	cp $(BINARY) $(INSTALL)
+	codesign --sign - --force --preserve-metadata=entitlements,requirements,flags $(INSTALL)
 	@echo "Installed to $(INSTALL)"
 
 test:
