@@ -1,10 +1,10 @@
 BINARY  := claude-context-proxy
 INSTALL := $(HOME)/.local/bin/$(BINARY)
 
-.PHONY: build run install test clean
+.PHONY: build run install test bench lint clean
 
 build:
-	go build -o $(BINARY) .
+	go build -ldflags="-s -w" -o $(BINARY) .
 
 run: build
 	./$(BINARY)
@@ -15,7 +15,13 @@ install: build
 	@echo "Installed to $(INSTALL)"
 
 test:
-	go test ./... -v
+	go test ./...
+
+bench:
+	go test -bench=. -benchtime=3s ./...
+
+lint:
+	go vet ./...
 
 clean:
 	rm -f $(BINARY)
