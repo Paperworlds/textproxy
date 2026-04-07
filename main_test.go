@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,11 +26,17 @@ func withTempCache(t *testing.T) func() {
 	mu.Lock()
 	session = nil
 	mu.Unlock()
+	// Ensure cfg is initialized for tests.
+	origCfg := cfg
+	if cfg == nil {
+		cfg = defaultConfig()
+	}
 	return func() {
 		os.Setenv("HOME", origHome)
 		mu.Lock()
 		session = nil
 		mu.Unlock()
+		cfg = origCfg
 	}
 }
 
@@ -85,7 +92,7 @@ func TestTokenHeaderExtraction(t *testing.T) {
 		io.Copy(w, resp.Body)
 
 		if inputTokens > 0 || outputTokens > 0 {
-			recordTokens(inputTokens, outputTokens, r.URL.Path, nil)
+			recordTokens(inputTokens, outputTokens, r.URL.Path, "", nil)
 		}
 	})
 
@@ -190,8 +197,8 @@ func TestSessionJSONWritten(t *testing.T) {
 	cleanup := withTempCache(t)
 	defer cleanup()
 
-	recordTokens(1000, 200, "/v1/messages", nil)
-	recordTokens(500, 100, "/v1/messages", nil)
+	recordTokens(1000, 200, "/v1/messages", "", nil)
+	recordTokens(500, 100, "/v1/messages", "", nil)
 	time.Sleep(20 * time.Millisecond)
 
 	data, err := os.ReadFile(sessionFile())
@@ -293,7 +300,14 @@ func TestFmtInt64(t *testing.T) {
 // buildTestProxyHandler creates a proxyHandler-equivalent targeting targetURL.
 func buildTestProxyHandler(targetURL string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxyReq, err := http.NewRequest(r.Method, targetURL+r.RequestURI, r.Body)
+		// Buffer the request body to extract model and then replay it.
+		var bodyBuf []byte
+		if r.Body != nil {
+			bodyBuf, _ = io.ReadAll(r.Body)
+		}
+		model := extractModel(bodyBuf)
+
+		proxyReq, err := http.NewRequest(r.Method, targetURL+r.RequestURI, io.NopCloser(bytes.NewReader(bodyBuf)))
 		if err != nil {
 			http.Error(w, "bad request", 400)
 			return
@@ -344,7 +358,7 @@ func buildTestProxyHandler(targetURL string) http.Handler {
 		}
 
 		if inputTokens > 0 || outputTokens > 0 {
-			recordTokens(inputTokens, outputTokens, r.URL.Path, nil)
+			recordTokens(inputTokens, outputTokens, r.URL.Path, model, nil)
 		}
 	})
 }
@@ -357,12 +371,12 @@ func TestSessionID(t *testing.T) {
 	cleanup := withTempCache(t)
 	defer cleanup()
 
-	savedGap := sessionGapMinutes
-	sessionGapMinutes = 1
-	defer func() { sessionGapMinutes = savedGap }()
+	savedGap := cfg.SessionGapMinutes
+	cfg.SessionGapMinutes = 1
+	defer func() { cfg.SessionGapMinutes = savedGap }()
 
-	recordTokens(100, 10, "/v1/messages", nil)
-	recordTokens(200, 20, "/v1/messages", nil)
+	recordTokens(100, 10, "/v1/messages", "", nil)
+	recordTokens(200, 20, "/v1/messages", "", nil)
 	time.Sleep(20 * time.Millisecond)
 
 	hist := readHistory()
@@ -393,7 +407,7 @@ func TestSessionID(t *testing.T) {
 	mu.Unlock()
 	saveSession(stale)
 
-	recordTokens(50, 5, "/v1/messages", nil)
+	recordTokens(50, 5, "/v1/messages", "", nil)
 	time.Sleep(20 * time.Millisecond)
 
 	hist2 := readHistory()
@@ -581,8 +595,9 @@ func TestStatuslineWrite(t *testing.T) {
 	statePath := filepath.Join(tmp, "ctx.json")
 	os.Setenv("CTX_STATUSLINE_PATH", statePath)
 	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+	cfg = loadConfig() // Reload to pick up env var
 
-	recordTokens(284391, 18204, "/v1/messages", nil)
+	recordTokens(284391, 18204, "/v1/messages", "", nil)
 	time.Sleep(20 * time.Millisecond)
 
 	data, err := os.ReadFile(statePath)
@@ -608,7 +623,7 @@ func TestStatuslineWrite(t *testing.T) {
 	if state.UpdatedAt.IsZero() {
 		t.Error("UpdatedAt should not be zero")
 	}
-	expectedCost := float64(284391)/1_000_000*inputPriceMtok + float64(18204)/1_000_000*outputPriceMtok
+	expectedCost := costUSD(cfg.DefaultModel, 284391, 18204)
 	if state.CostUSD < expectedCost-0.01 || state.CostUSD > expectedCost+0.01 {
 		t.Errorf("CostUSD = %.4f, want ~%.4f", state.CostUSD, expectedCost)
 	}
@@ -623,8 +638,9 @@ func TestStatuslineAtomic(t *testing.T) {
 	statePath := filepath.Join(tmp, "ctx.json")
 	os.Setenv("CTX_STATUSLINE_PATH", statePath)
 	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+	cfg = loadConfig() // Reload to pick up env var
 
-	recordTokens(1000, 100, "/v1/messages", nil)
+	recordTokens(1000, 100, "/v1/messages", "", nil)
 	time.Sleep(20 * time.Millisecond)
 
 	// No .tmp file should remain.
@@ -646,6 +662,7 @@ func TestStatuslineCmd(t *testing.T) {
 	statePath := filepath.Join(tmp, "ctx.json")
 	os.Setenv("CTX_STATUSLINE_PATH", statePath)
 	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+	cfg = loadConfig() // Reload to pick up env var
 
 	state := StatuslineState{
 		InputTokens:  284391,
@@ -688,6 +705,7 @@ func TestStatuslineCmdJSON(t *testing.T) {
 	statePath := filepath.Join(tmp, "ctx.json")
 	os.Setenv("CTX_STATUSLINE_PATH", statePath)
 	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+	cfg = loadConfig() // Reload to pick up env var
 
 	state := StatuslineState{
 		InputTokens:  1000,
@@ -724,9 +742,10 @@ func TestStatuslineDisabled(t *testing.T) {
 
 	os.Setenv("CTX_STATUSLINE_PATH", "")
 	defer os.Unsetenv("CTX_STATUSLINE_PATH")
+	cfg = loadConfig() // Reload to pick up env var
 
 	// Should not panic or write anything.
-	recordTokens(500, 50, "/v1/messages", nil)
+	recordTokens(500, 50, "/v1/messages", "", nil)
 	time.Sleep(20 * time.Millisecond)
 
 	// Verify statuslinePath returns "".
@@ -798,9 +817,9 @@ func TestSessionGapReset(t *testing.T) {
 	defer cleanup()
 
 	// Force session gap to 1 minute.
-	savedGap := sessionGapMinutes
-	sessionGapMinutes = 1
-	defer func() { sessionGapMinutes = savedGap }()
+	savedGap := cfg.SessionGapMinutes
+	cfg.SessionGapMinutes = 1
+	defer func() { cfg.SessionGapMinutes = savedGap }()
 
 	// Write a session that ended 2 minutes ago.
 	old := time.Now().UTC().Add(-2 * time.Minute)
@@ -820,7 +839,7 @@ func TestSessionGapReset(t *testing.T) {
 	session = nil
 	mu.Unlock()
 
-	recordTokens(100, 10, "/v1/messages", nil)
+	recordTokens(100, 10, "/v1/messages", "", nil)
 	time.Sleep(20 * time.Millisecond)
 
 	data2, _ := os.ReadFile(sessionFile())
@@ -913,7 +932,7 @@ func TestHistoryToolField(t *testing.T) {
 	defer cleanup()
 
 	tools := []string{"Read", "Bash", "Read"}
-	recordTokens(1000, 100, "/v1/messages", tools)
+	recordTokens(1000, 100, "/v1/messages", "", tools)
 	time.Sleep(20 * time.Millisecond)
 
 	hist := readHistory()
@@ -935,7 +954,7 @@ func TestHistoryToolFieldNil(t *testing.T) {
 	cleanup := withTempCache(t)
 	defer cleanup()
 
-	recordTokens(500, 50, "/v1/messages", nil)
+	recordTokens(500, 50, "/v1/messages", "", nil)
 	time.Sleep(20 * time.Millisecond)
 
 	data, err := os.ReadFile(historyFile())
@@ -1014,5 +1033,169 @@ func TestStatsToolsFlag(t *testing.T) {
 	readIdx := strings.Index(output, "Read")
 	if bashIdx > readIdx {
 		t.Errorf("Bash (3 calls) should appear before Read (2 calls) in output")
+	}
+}
+
+// ── Phase 5 tests ──────────────────────────────────────────────────────────
+
+// TestConfigLoad verifies config loading: defaults, file, and env overrides.
+func TestConfigLoad(t *testing.T) {
+	// Save original cfg.
+	origCfg := cfg
+
+	tmp := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmp)
+	defer func() {
+		os.Setenv("HOME", origHome)
+		cfg = origCfg
+	}()
+
+	// Test 1: Missing file → defaults.
+	cfg = loadConfig()
+	if cfg.Port != 7474 {
+		t.Errorf("Port = %d, want 7474", cfg.Port)
+	}
+	if cfg.SessionGapMinutes != 30 {
+		t.Errorf("SessionGapMinutes = %d, want 30", cfg.SessionGapMinutes)
+	}
+	if cfg.DefaultModel != "claude-sonnet-4" {
+		t.Errorf("DefaultModel = %q, want claude-sonnet-4", cfg.DefaultModel)
+	}
+
+	// Test 2: File with custom values.
+	cfgDir := filepath.Join(tmp, ".config", "claude-context-proxy")
+	os.MkdirAll(cfgDir, 0o755)
+	customCfg := &Config{
+		Port:              8888,
+		SessionGapMinutes: 60,
+		StatuslinePath:    "~/.custom/path",
+		Inspect:           true,
+		DefaultModel:      "claude-opus-4",
+		Pricing: map[string]ModelPrice{
+			"claude-opus-4": {InputPerMtok: 15.00, OutputPerMtok: 75.00},
+		},
+	}
+	data, _ := json.MarshalIndent(customCfg, "", "  ")
+	os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0o644)
+
+	cfg = loadConfig()
+	if cfg.Port != 8888 {
+		t.Errorf("Port = %d, want 8888", cfg.Port)
+	}
+	if cfg.SessionGapMinutes != 60 {
+		t.Errorf("SessionGapMinutes = %d, want 60", cfg.SessionGapMinutes)
+	}
+	if cfg.Inspect != true {
+		t.Errorf("Inspect = %v, want true", cfg.Inspect)
+	}
+	if cfg.DefaultModel != "claude-opus-4" {
+		t.Errorf("DefaultModel = %q, want claude-opus-4", cfg.DefaultModel)
+	}
+
+	// Test 3: Env vars override file.
+	os.Setenv("CTX_PORT", "9999")
+	os.Setenv("CTX_SESSION_GAP_MINUTES", "90")
+	cfg = loadConfig()
+	if cfg.Port != 9999 {
+		t.Errorf("Port = %d, want 9999 (env override)", cfg.Port)
+	}
+	if cfg.SessionGapMinutes != 90 {
+		t.Errorf("SessionGapMinutes = %d, want 90 (env override)", cfg.SessionGapMinutes)
+	}
+	os.Unsetenv("CTX_PORT")
+	os.Unsetenv("CTX_SESSION_GAP_MINUTES")
+}
+
+// TestModelDetection verifies that model is extracted from request body.
+func TestModelDetection(t *testing.T) {
+	origCfg := cfg
+	cfg = defaultConfig()
+	defer func() { cfg = origCfg }()
+
+	tests := []struct {
+		name     string
+		body     string
+		wantModel string
+	}{
+		{
+			name:      "request with claude-opus-4",
+			body:      `{"model":"claude-opus-4","messages":[]}`,
+			wantModel: "claude-opus-4",
+		},
+		{
+			name:      "request with claude-haiku-4",
+			body:      `{"model":"claude-haiku-4","messages":[]}`,
+			wantModel: "claude-haiku-4",
+		},
+		{
+			name:      "request missing model field",
+			body:      `{"messages":[]}`,
+			wantModel: "claude-sonnet-4", // default
+		},
+		{
+			name:      "empty body",
+			body:      ``,
+			wantModel: "claude-sonnet-4", // default
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractModel([]byte(tc.body))
+			if got != tc.wantModel {
+				t.Errorf("extractModel(%q) = %q, want %q", tc.body, got, tc.wantModel)
+			}
+		})
+	}
+}
+
+// TestModelFallback verifies unknown models use default model pricing.
+func TestModelFallback(t *testing.T) {
+	origCfg := cfg
+	cfg = defaultConfig()
+	defer func() { cfg = origCfg }()
+
+	// Use a model not in the pricing map.
+	unknownModel := "claude-unknown-999"
+
+	// Get pricing for unknown model; should fall back to default.
+	_, ok := cfg.Pricing[unknownModel]
+	if ok {
+		t.Fatalf("unexpected pricing found for unknown model")
+	}
+
+	// costUSD should use default model pricing.
+	cost := costUSD(unknownModel, 1_000_000, 1_000_000)
+	defaultPricing := cfg.Pricing[cfg.DefaultModel]
+	expectedCost := defaultPricing.InputPerMtok + defaultPricing.OutputPerMtok
+	if cost != expectedCost {
+		t.Errorf("costUSD(unknown, 1M, 1M) = %.2f, want %.2f (default model %q)", cost, expectedCost, cfg.DefaultModel)
+	}
+}
+
+// TestHistoryHasModel verifies history.jsonl entries include the model field.
+func TestHistoryHasModel(t *testing.T) {
+	cleanup := withTempCache(t)
+	defer cleanup()
+
+	origCfg := cfg
+	cfg = defaultConfig()
+	defer func() { cfg = origCfg }()
+
+	recordTokens(100, 50, "/v1/messages", "claude-opus-4", nil)
+	recordTokens(200, 75, "/v1/messages", "claude-haiku-4", nil)
+	time.Sleep(20 * time.Millisecond)
+
+	hist := readHistory()
+	if len(hist) != 2 {
+		t.Fatalf("history has %d entries, want 2", len(hist))
+	}
+
+	if hist[0].Model != "claude-opus-4" {
+		t.Errorf("history[0].Model = %q, want claude-opus-4", hist[0].Model)
+	}
+	if hist[1].Model != "claude-haiku-4" {
+		t.Errorf("history[1].Model = %q, want claude-haiku-4", hist[1].Model)
 	}
 }

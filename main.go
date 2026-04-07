@@ -18,12 +18,41 @@ import (
 )
 
 const (
-	upstream        = "https://api.anthropic.com"
-	listenAddr      = ":7474"
-	cacheDir        = ".cache/claude-context-proxy"
-	inputPriceMtok  = 3.00  // $ per million input tokens
-	outputPriceMtok = 15.00 // $ per million output tokens
+	upstream = "https://api.anthropic.com"
+	cacheDir = ".cache/claude-context-proxy"
 )
+
+// ModelPrice holds pricing for a model.
+type ModelPrice struct {
+	InputPerMtok  float64 `json:"input_per_mtok"`
+	OutputPerMtok float64 `json:"output_per_mtok"`
+}
+
+// Config holds the proxy configuration.
+type Config struct {
+	Port               int                     `json:"port"`
+	SessionGapMinutes  int64                   `json:"session_gap_minutes"`
+	StatuslinePath     string                  `json:"statusline_path"`
+	Inspect            bool                    `json:"inspect"`
+	Pricing            map[string]ModelPrice   `json:"pricing"`
+	DefaultModel       string                  `json:"default_model"`
+}
+
+// defaultConfig returns the built-in defaults.
+func defaultConfig() *Config {
+	return &Config{
+		Port:              7474,
+		SessionGapMinutes: 30,
+		StatuslinePath:    "~/.files/states/ctx.json",
+		Inspect:           false,
+		Pricing: map[string]ModelPrice{
+			"claude-sonnet-4": {InputPerMtok: 3.00, OutputPerMtok: 15.00},
+			"claude-haiku-4":  {InputPerMtok: 0.80, OutputPerMtok: 4.00},
+			"claude-opus-4":   {InputPerMtok: 15.00, OutputPerMtok: 75.00},
+		},
+		DefaultModel: "claude-sonnet-4",
+	}
+}
 
 // Session holds per-session accumulated stats.
 type Session struct {
@@ -42,15 +71,14 @@ type HistoryEntry struct {
 	Input     int64     `json:"input"`
 	Output    int64     `json:"output"`
 	Path      string    `json:"path"`
+	Model     string    `json:"model,omitempty"`
 	Tools     []string  `json:"tools,omitempty"`
 }
 
 var (
-	mu      sync.Mutex
+	mu     sync.Mutex
 	session *Session
-
-	sessionGapMinutes int64 = 30
-	inspectEnabled    bool
+	cfg    *Config
 )
 
 func cacheBase() string {
@@ -61,8 +89,97 @@ func cacheBase() string {
 	return filepath.Join(home, cacheDir)
 }
 
+func configDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".config", "claude-context-proxy")
+}
+
+func configPath() string {
+	return filepath.Join(configDir(), "config.json")
+}
+
 func sessionFile() string  { return filepath.Join(cacheBase(), "session.json") }
 func historyFile() string  { return filepath.Join(cacheBase(), "history.jsonl") }
+
+// loadConfig loads the config file, applying env overrides.
+// Returns a merged config: defaults < file < env vars.
+func loadConfig() *Config {
+	cfg := defaultConfig()
+
+	// Try to load from config file.
+	path := configPath()
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var fileCfg Config
+		if json.Unmarshal(data, &fileCfg) == nil {
+			// Merge file config into defaults.
+			if fileCfg.Port != 0 {
+				cfg.Port = fileCfg.Port
+			}
+			if fileCfg.SessionGapMinutes != 0 {
+				cfg.SessionGapMinutes = fileCfg.SessionGapMinutes
+			}
+			if fileCfg.StatuslinePath != "" {
+				cfg.StatuslinePath = fileCfg.StatuslinePath
+			}
+			if fileCfg.Inspect {
+				cfg.Inspect = fileCfg.Inspect
+			}
+			if len(fileCfg.Pricing) > 0 {
+				cfg.Pricing = fileCfg.Pricing
+			}
+			if fileCfg.DefaultModel != "" {
+				cfg.DefaultModel = fileCfg.DefaultModel
+			}
+		}
+	}
+
+	// Apply env var overrides.
+	if v := os.Getenv("CTX_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Port = n
+		}
+	}
+	if v := os.Getenv("CTX_SESSION_GAP_MINUTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			cfg.SessionGapMinutes = n
+		}
+	}
+	// CTX_STATUSLINE_PATH can be set to empty string to disable, so use LookupEnv
+	if v, ok := os.LookupEnv("CTX_STATUSLINE_PATH"); ok {
+		cfg.StatuslinePath = v
+	}
+	if os.Getenv("CTX_INSPECT") == "1" {
+		cfg.Inspect = true
+	}
+
+	return cfg
+}
+
+// ensureConfigFile creates the config file with defaults if it doesn't exist.
+func ensureConfigFile() {
+	path := configPath()
+	if _, err := os.Stat(path); err == nil {
+		return // file exists
+	}
+
+	// Create directory.
+	dir := configDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+
+	// Write defaults.
+	cfg := defaultConfig()
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0o644)
+}
 
 func loadSession() *Session {
 	data, err := os.ReadFile(sessionFile())
@@ -96,15 +213,30 @@ type StatuslineState struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// expandHome replaces ~ with the user's home directory.
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
 func statuslinePath() string {
-	if v, ok := os.LookupEnv("CTX_STATUSLINE_PATH"); ok {
-		return v
+	return expandHome(cfg.StatuslinePath)
+}
+
+// costUSD calculates cost for a model based on tokens.
+// If model is not found in pricing, uses default model pricing.
+func costUSD(model string, inputTokens, outputTokens int64) float64 {
+	pricing, ok := cfg.Pricing[model]
+	if !ok {
+		pricing = cfg.Pricing[cfg.DefaultModel]
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	return filepath.Join(home, ".files", "states", "ctx.json")
+	return float64(inputTokens)/1_000_000*pricing.InputPerMtok + float64(outputTokens)/1_000_000*pricing.OutputPerMtok
 }
 
 func writeStatusline(s *Session) {
@@ -117,7 +249,8 @@ func writeStatusline(s *Session) {
 		log.Printf("statusline: cannot create dir %s: %v", dir, err)
 		return
 	}
-	cost := float64(s.InputTokens)/1_000_000*inputPriceMtok + float64(s.OutputTokens)/1_000_000*outputPriceMtok
+	// For statusline, we use default model pricing since we don't track per-request models in Session
+	cost := costUSD(cfg.DefaultModel, s.InputTokens, s.OutputTokens)
 	state := StatuslineState{
 		InputTokens:  s.InputTokens,
 		OutputTokens: s.OutputTokens,
@@ -210,12 +343,12 @@ func (s *sseInspector) parseEvent(raw []byte) {
 	}
 }
 
-func recordTokens(input, output int64, path string, tools []string) {
+func recordTokens(input, output int64, path, model string, tools []string) {
 	mu.Lock()
 	defer mu.Unlock()
 
 	now := time.Now().UTC()
-	gap := time.Duration(sessionGapMinutes) * time.Minute
+	gap := time.Duration(cfg.SessionGapMinutes) * time.Minute
 
 	if session == nil || (session.LastRequestAt != time.Time{} && now.Sub(session.LastRequestAt) > gap) {
 		session = &Session{
@@ -231,13 +364,31 @@ func recordTokens(input, output int64, path string, tools []string) {
 
 	saveSession(session)
 	writeStatusline(session)
-	appendHistory(HistoryEntry{SessionID: session.SessionID, TS: now, Input: input, Output: output, Path: path, Tools: tools})
+	appendHistory(HistoryEntry{SessionID: session.SessionID, TS: now, Input: input, Output: output, Path: path, Model: model, Tools: tools})
+}
+
+func extractModel(body []byte) string {
+	var data map[string]interface{}
+	if json.Unmarshal(body, &data) != nil {
+		return cfg.DefaultModel
+	}
+	if model, ok := data["model"].(string); ok && model != "" {
+		return model
+	}
+	return cfg.DefaultModel
 }
 
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	target := upstream + r.RequestURI
 
-	proxyReq, err := http.NewRequest(r.Method, target, r.Body)
+	// Buffer the request body to extract model and then replay it.
+	var bodyBuf []byte
+	if r.Body != nil {
+		bodyBuf, _ = io.ReadAll(r.Body)
+	}
+	model := extractModel(bodyBuf)
+
+	proxyReq, err := http.NewRequest(r.Method, target, io.NopCloser(bytes.NewReader(bodyBuf)))
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -275,7 +426,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	var inspector *sseInspector
 	if isSSE {
 		bodyReader := io.Reader(resp.Body)
-		if inspectEnabled {
+		if cfg.Inspect {
 			inspector = newSSEInspector(resp.Body)
 			bodyReader = inspector
 		}
@@ -305,7 +456,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		if inspector != nil {
 			tools = inspector.Tools
 		}
-		go recordTokens(inputTokens, outputTokens, r.URL.Path, tools)
+		go recordTokens(inputTokens, outputTokens, r.URL.Path, model, tools)
 	}
 }
 
@@ -330,8 +481,8 @@ func cmdStats(args []string) {
 		durStr = fmt.Sprintf("%dh%dm", hours, minutes%60)
 	}
 
-	inputCost := float64(s.InputTokens) / 1_000_000 * inputPriceMtok
-	outputCost := float64(s.OutputTokens) / 1_000_000 * outputPriceMtok
+	inputCost := costUSD(cfg.DefaultModel, s.InputTokens, 0)
+	outputCost := costUSD(cfg.DefaultModel, 0, s.OutputTokens)
 
 	sep := "─────────────────────────────────────"
 	fmt.Printf("Session: %s (%s)\n", s.StartedAt.Local().Format("2006-01-02 15:04"), durStr)
@@ -470,7 +621,7 @@ func cmdSessions() {
 	fmt.Println(strings.Repeat("─", 72))
 	for _, sid := range order {
 		r := rows[sid]
-		cost := float64(r.input)/1_000_000*inputPriceMtok + float64(r.output)/1_000_000*outputPriceMtok
+		cost := costUSD(cfg.DefaultModel, r.input, r.output)
 		label := sid
 		if sid != "(unknown)" {
 			label = r.startedAt.Local().Format("2006-01-02 15:04")
@@ -573,6 +724,27 @@ func readHistory() []HistoryEntry {
 	return entries
 }
 
+// ── Config CLI ─────────────────────────────────────────────────────────────
+
+func cmdConfig(args []string) {
+	fs := flag.NewFlagSet("config", flag.ExitOnError)
+	pathOnly := fs.Bool("path", false, "print config file path only")
+	_ = fs.Parse(args)
+
+	if *pathOnly {
+		fmt.Println(configPath())
+		return
+	}
+
+	// Print effective config as JSON.
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(string(data))
+}
+
 // ── Statusline CLI ─────────────────────────────────────────────────────────
 
 func fmtCompact(n int64) string {
@@ -663,15 +835,9 @@ func fmtInt64(n int64) string {
 // ── main ───────────────────────────────────────────────────────────────────
 
 func main() {
-	// Read session gap from env.
-	if v := os.Getenv("CTX_SESSION_GAP_MINUTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
-			sessionGapMinutes = n
-		}
-	}
-
-	// Enable SSE inspection if requested.
-	inspectEnabled = os.Getenv("CTX_INSPECT") == "1"
+	// Load config (defaults + file + env overrides).
+	cfg = loadConfig()
+	ensureConfigFile()
 
 	// Subcommand dispatch.
 	if len(os.Args) > 1 {
@@ -688,6 +854,9 @@ func main() {
 		case "statusline":
 			cmdStatusline(os.Args[2:])
 			return
+		case "config":
+			cmdConfig(os.Args[2:])
+			return
 		}
 	}
 
@@ -695,13 +864,14 @@ func main() {
 	mu.Lock()
 	session = loadSession()
 	if session != nil {
-		gap := time.Duration(sessionGapMinutes) * time.Minute
+		gap := time.Duration(cfg.SessionGapMinutes) * time.Minute
 		if time.Since(session.LastRequestAt) > gap {
 			session = nil
 		}
 	}
 	mu.Unlock()
 
+	listenAddr := fmt.Sprintf(":%d", cfg.Port)
 	http.HandleFunc("/", proxyHandler)
 	log.Printf("claude-context-proxy listening on %s → %s", listenAddr, upstream)
 	log.Fatal(http.ListenAndServe(listenAddr, nil))
