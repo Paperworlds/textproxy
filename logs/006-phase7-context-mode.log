@@ -1,0 +1,15 @@
+Done. Here's what was built:
+
+**Phase 7 — context mode vs cost mode**
+
+Two commits pushed to `main`:
+
+1. **Config changes** — `mode` (`"context"`/`"cost"`) and `context_windows` fields added to `Config`. Default is `context`. `CTX_MODE` env var overrides. `ContextWindow(model)` helper falls back to 200,000.
+
+2. **Rendering + tests** — `CmdStats` and `CmdStatusline` branch on mode:
+   - **context** (default): `⬡ 284k in · 1.4w · 15.6:1`, stats show `1.4× windows`, `Context ratio`, spikes with `(41% of window)`, no `$`
+   - **cost**: unchanged prior behaviour
+   - `FmtWindows` / `FmtWindowPct` helpers added to `internal/cli`
+   - 6 new tests + 2 existing tests fixed for explicit cost mode
+
+**36/36 tests pass.**

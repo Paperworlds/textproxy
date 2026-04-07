@@ -27,6 +27,34 @@ func SessionFile() string { return filepath.Join(CacheBase(), "session.json") }
 // HistoryFile returns the path to history.jsonl.
 func HistoryFile() string { return filepath.Join(CacheBase(), "history.jsonl") }
 
+// PIDFile returns the path to proxy.pid.
+func PIDFile() string { return filepath.Join(CacheBase(), "proxy.pid") }
+
+// LogFile returns the path to the daemon log file.
+func LogFile() string { return filepath.Join(CacheBase(), "proxy.log") }
+
+// WritePID writes the current process PID to proxy.pid.
+func WritePID() {
+	if err := os.MkdirAll(CacheBase(), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(PIDFile(), []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
+}
+
+// RemovePID deletes proxy.pid.
+func RemovePID() { _ = os.Remove(PIDFile()) }
+
+// ReadPID reads the PID from proxy.pid. Returns 0 if absent or invalid.
+func ReadPID() int {
+	data, err := os.ReadFile(PIDFile())
+	if err != nil {
+		return 0
+	}
+	var pid int
+	fmt.Sscanf(string(data), "%d", &pid)
+	return pid
+}
+
 // LoadSession reads session.json from disk. Returns nil if absent or corrupt.
 func LoadSession() *Session {
 	data, err := os.ReadFile(SessionFile())

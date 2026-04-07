@@ -1,0 +1,13 @@
+Phase 3 is complete. Here's what was built:
+
+**Statusline state file** — after every proxied request, `~/.files/states/ctx.json` is written atomically (tmp → rename) with `input_tokens`, `output_tokens`, `requests`, `cost_usd`, `session_id`, `updated_at`. Directory creation failures are logged but never crash the proxy.
+
+**Configurable path** — `CTX_STATUSLINE_PATH` overrides the default; empty string disables writes entirely.
+
+**`statusline` subcommand** — prints a compact one-liner for fish prompts:
+```
+⬡ 284k in · 18k out · $1.13
+```
+Silent (exit 0) if file is missing or stale (>35 min). `--json` flag prints raw JSON.
+
+**7 new tests** — all 17 tests pass.

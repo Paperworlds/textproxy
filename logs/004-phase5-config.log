@@ -1,0 +1,49 @@
+## ✅ Phase 5 Complete: Config File & Multi-Model Pricing
+
+All implementation work is complete and tested. Here's what was delivered:
+
+### **Config File System** (`~/.config/claude-context-proxy/config.json`)
+- Auto-created with sensible defaults on first run
+- Supports: port, session_gap_minutes, statusline_path, inspect flag
+- Per-model pricing for claude-sonnet-4, claude-haiku-4, and claude-opus-4
+- Environment variables override file config (backward compatible)
+
+### **Model Detection**
+- Request bodies are buffered to extract the `"model"` field
+- Unknown models fall back to `default_model` pricing
+- Body is replayed verbatim—no data loss
+
+### **Per-Model Pricing**
+- `HistoryEntry` now tracks which model was used
+- `costUSD()` function applies model-specific pricing
+- Session stats respect pricing tiers
+
+### **Config Subcommand**
+```bash
+claude-context-proxy config              # Print effective config
+claude-context-proxy config --path       # Print config file path
+```
+
+### **Test Coverage** ✅
+- **TestConfigLoad**: Config merging (defaults → file → env)
+- **TestModelDetection**: Model extraction from JSON bodies
+- **TestModelFallback**: Unknown models use default pricing
+- **TestHistoryHasModel**: Model field persists in history
+- **All 31 existing tests**: Still passing
+
+### **Verification**
+- ✅ `go build ./...` succeeds
+- ✅ `go test ./...` passes (31/31)
+- ✅ Config file created automatically with correct defaults
+- ✅ Model detection extracts from request bodies
+- ✅ Pricing calculated per-model
+
+### **Files Changed**
+- `main.go`: Config loading, model detection, pricing, config subcommand
+- `main_test.go`: 4 new tests + updates for model parameter
+
+### **Commit**
+- **Hash**: `8699978`
+- **Message**: `feat: add config file & multi-model pricing (phase 5)`
+
+**Report**: `/Users/projects/personal/claude-context-proxy/reports/004-phase5-config.report.md`

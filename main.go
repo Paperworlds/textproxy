@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -18,6 +19,8 @@ import (
 	"github.com/pdonorio/claude-context-proxy/internal/stats"
 )
 
+const version = "0.1.0"
+
 // Type aliases so that tests (package main) can use the unqualified names.
 type Session = stats.Session
 type HistoryEntry = stats.HistoryEntry
@@ -27,15 +30,13 @@ type ModelPrice = config.ModelPrice
 
 // Package globals — accessed directly by tests.
 var (
-	mu      sync.Mutex
+	mu  sync.Mutex
 	session *Session
 	cfg     *config.Config
 	wg      sync.WaitGroup // tracks in-flight recordTokens goroutines
 )
 
 // ── Forwarding functions ────────────────────────────────────────────────────
-// These keep the same names as the original functions so that existing tests
-// (in package main) compile and pass without any changes to test logic.
 
 func cacheBase() string     { return stats.CacheBase() }
 func sessionFile() string   { return stats.SessionFile() }
@@ -56,20 +57,18 @@ func appendHistory(e HistoryEntry) {
 	}
 }
 
-func statuslinePath() string                        { return stats.StatuslinePath(cfg) }
-func costUSD(model string, in, out int64) float64   { return stats.CostUSD(cfg, model, in, out) }
-func extractModel(body []byte) string               { return stats.ExtractModel(cfg, body) }
-func writeStatusline(s *Session)                    { stats.WriteStatusline(cfg, s) }
+func statuslinePath() string                          { return stats.StatuslinePath(cfg) }
+func costUSD(model string, in, out int64) float64     { return stats.CostUSD(cfg, model, in, out) }
+func extractModel(body []byte) string                 { return stats.ExtractModel(cfg, body) }
+func writeStatusline(s *Session)                      { stats.WriteStatusline(cfg, s) }
 func newSSEInspector(r io.Reader) *proxy.SSEInspector { return proxy.NewSSEInspector(r) }
-func fmtInt64(n int64) string                       { return cli.FmtInt64(n) }
-func fmtCompact(n int64) string                     { return cli.FmtCompact(n) }
-func fmtInt(n int) string                           { return cli.FmtInt(n) }
-func defaultConfig() *config.Config                 { return config.Default() }
-func loadConfig() *config.Config                    { return config.Load() }
+func fmtInt64(n int64) string                         { return cli.FmtInt64(n) }
+func fmtCompact(n int64) string                       { return cli.FmtCompact(n) }
+func fmtInt(n int) string                             { return cli.FmtInt(n) }
+func defaultConfig() *config.Config                   { return config.Default() }
+func loadConfig() *config.Config                      { return config.Load() }
 
 // recordTokens applies token counts to the current session and persists stats.
-// It is called synchronously; the proxy hot path spawns it in a goroutine
-// tracked by wg for graceful shutdown.
 func recordTokens(input, output int64, path, model string, tools []string) {
 	mu.Lock()
 	session = stats.ApplyTokens(session, cfg, input, output)
@@ -101,34 +100,109 @@ func cmdHistory(args []string)    { cli.CmdHistory(args) }
 func cmdStatusline(args []string) { cli.CmdStatusline(args, cfg) }
 func cmdConfig(args []string)     { cli.CmdConfig(args, cfg) }
 
-// ── main ────────────────────────────────────────────────────────────────────
+// ── Daemon management ───────────────────────────────────────────────────────
 
-func main() {
-	cfg = config.Load()
-	config.EnsureFile()
-
-	// Subcommand dispatch.
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "stats":
-			cmdStats(os.Args[2:])
-			return
-		case "sessions":
-			cmdSessions()
-			return
-		case "history":
-			cmdHistory(os.Args[2:])
-			return
-		case "statusline":
-			cmdStatusline(os.Args[2:])
-			return
-		case "config":
-			cmdConfig(os.Args[2:])
-			return
-		}
+// cmdStart launches the proxy as a background daemon.
+// If _CCP_DAEMON=1 is set we are already the daemon child — run the server.
+func cmdStart() {
+	if os.Getenv("_CCP_DAEMON") == "1" {
+		runServer()
+		return
 	}
 
-	// Load existing session from disk so we survive restarts within the gap.
+	// Check if already running.
+	if pid := stats.ReadPID(); pid != 0 {
+		if proc, err := os.FindProcess(pid); err == nil {
+			if proc.Signal(syscall.Signal(0)) == nil {
+				fmt.Fprintf(os.Stderr, "proxy already running (pid %d)\n", pid)
+				os.Exit(1)
+			}
+		}
+		stats.RemovePID() // stale PID file
+	}
+
+	self, err := exec.LookPath(os.Args[0])
+	if err != nil {
+		self = os.Args[0]
+	}
+
+	logPath := stats.LogFile()
+	if err := os.MkdirAll(stats.CacheBase(), 0o755); err != nil {
+		log.Fatalf("start: mkdir: %v", err)
+	}
+	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Fatalf("start: open log %s: %v", logPath, err)
+	}
+
+	cmd := exec.Command(self)
+	cmd.Env = append(os.Environ(), "_CCP_DAEMON=1")
+	cmd.Stdout = lf
+	cmd.Stderr = lf
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		log.Fatalf("start: %v", err)
+	}
+	lf.Close()
+
+	fmt.Printf("proxy started (pid %d) — logs: %s\n", cmd.Process.Pid, logPath)
+}
+
+// cmdStop sends SIGTERM to the running proxy.
+func cmdStop() {
+	pid := stats.ReadPID()
+	if pid == 0 {
+		fmt.Fprintln(os.Stderr, "stop: proxy not running (no pid file)")
+		os.Exit(1)
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		log.Fatalf("stop: find process %d: %v", pid, err)
+	}
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		log.Fatalf("stop: signal %d: %v", pid, err)
+	}
+	fmt.Printf("proxy stopped (pid %d)\n", pid)
+}
+
+// cmdRestart stops the running proxy and starts a new daemon.
+func cmdRestart() {
+	pid := stats.ReadPID()
+	if pid != 0 {
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Signal(syscall.SIGTERM)
+			fmt.Printf("restart: sent SIGTERM to pid %d\n", pid)
+			// Wait up to 3 s for old process to exit.
+			for i := 0; i < 30; i++ {
+				time.Sleep(100 * time.Millisecond)
+				if stats.ReadPID() == 0 {
+					break
+				}
+			}
+		}
+	}
+	cmdStart()
+}
+
+// cmdLog tails the daemon log file (last 40 lines, then follows).
+func cmdLog() {
+	logPath := stats.LogFile()
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "log: no log file at %s — has the proxy been started?\n", logPath)
+		os.Exit(1)
+	}
+	cmd := exec.Command("tail", "-n", "40", "-f", logPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+}
+
+// ── Server ──────────────────────────────────────────────────────────────────
+
+func runServer() {
+	stats.WritePID()
+	defer stats.RemovePID()
+
 	mu.Lock()
 	session = loadSession()
 	if session != nil {
@@ -153,12 +227,11 @@ func main() {
 		Handler: mux,
 	}
 
-	// Graceful shutdown on SIGINT / SIGTERM.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("claude-context-proxy listening on :%d → %s", cfg.Port, proxy.Upstream)
+		log.Printf("claude-context-proxy v%s listening on :%d → %s", version, cfg.Port, proxy.Upstream)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("server: %v", err)
 		}
@@ -174,7 +247,6 @@ func main() {
 		log.Printf("http shutdown: %v", err)
 	}
 
-	// Wait for all in-flight recordTokens goroutines to finish (max 5 s).
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -186,4 +258,52 @@ func main() {
 	case <-ctx.Done():
 		log.Println("flush timeout: some stats may not have been written")
 	}
+}
+
+// ── main ────────────────────────────────────────────────────────────────────
+
+func main() {
+	cfg = config.Load()
+	config.EnsureFile()
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "start":
+			cmdStart()
+			return
+		case "stop":
+			cmdStop()
+			return
+		case "restart":
+			cmdRestart()
+			return
+		case "stats":
+			cmdStats(os.Args[2:])
+			return
+		case "sessions":
+			cmdSessions()
+			return
+		case "history":
+			cmdHistory(os.Args[2:])
+			return
+		case "statusline":
+			cmdStatusline(os.Args[2:])
+			return
+		case "config":
+			cmdConfig(os.Args[2:])
+			return
+		case "log":
+			cmdLog()
+			return
+		case "version", "--version", "-v":
+			fmt.Printf("claude-context-proxy v%s\n", version)
+			return
+		case "--foreground", "-f":
+			runServer()
+			return
+		}
+	}
+
+	// Default: daemon start (or run server if already the daemon child).
+	cmdStart()
 }
