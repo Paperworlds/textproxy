@@ -184,6 +184,32 @@ func cmdRestart() {
 	cmdStart()
 }
 
+// cmdHelp prints usage.
+func cmdHelp() {
+	fmt.Printf(`claude-context-proxy v%s
+
+Usage:
+  claude-context-proxy [command]
+
+Daemon:
+  start        Start proxy as background daemon (default)
+  stop         Stop the running daemon
+  restart      Stop and restart the daemon
+  log          Tail the daemon log (-f to follow)
+  -f           Run in foreground
+
+Stats:
+  stats        Current session token usage
+  sessions     All past sessions
+  history      Per-request breakdown (--last, --today, --since=DATE)
+  statusline   Compact one-liner for shell prompts
+
+Config:
+  config       Show effective config (--path for file location)
+  version      Print version
+`, version)
+}
+
 // cmdLog tails the daemon log file (last 40 lines, then follows).
 func cmdLog() {
 	logPath := stats.LogFile()
@@ -292,8 +318,11 @@ func main() {
 		case "config":
 			cmdConfig(os.Args[2:])
 			return
-		case "log":
+		case "log", "logs":
 			cmdLog()
+			return
+		case "help", "--help", "-h":
+			cmdHelp()
 			return
 		case "version", "--version", "-v":
 			fmt.Printf("claude-context-proxy v%s\n", version)
@@ -302,6 +331,13 @@ func main() {
 			runServer()
 			return
 		}
+	}
+
+	// Unknown subcommand.
+	if len(os.Args) > 1 {
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", os.Args[1])
+		cmdHelp()
+		os.Exit(1)
 	}
 
 	// Default: daemon start (or run server if already the daemon child).
