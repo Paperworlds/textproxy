@@ -10,15 +10,24 @@ import (
 	"github.com/pdonorio/claude-context-proxy/internal/config"
 )
 
-const cacheSubDir = ".cache/claude-context-proxy"
+const cacheSubDir = ".cache/ai-proxy"
+const cacheLegacySubDir = ".cache/claude-context-proxy"
 
 // CacheBase returns the directory used for session and history files.
+// Migrates from the legacy directory name on first call if needed.
 func CacheBase() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, cacheSubDir)
+	newDir := filepath.Join(home, cacheSubDir)
+	oldDir := filepath.Join(home, cacheLegacySubDir)
+	if _, err := os.Stat(oldDir); err == nil {
+		if _, err := os.Stat(newDir); os.IsNotExist(err) {
+			_ = os.Rename(oldDir, newDir)
+		}
+	}
+	return newDir
 }
 
 // SessionFile returns the path to session.json.

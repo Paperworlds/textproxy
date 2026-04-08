@@ -22,7 +22,7 @@ import (
 	"github.com/pdonorio/claude-context-proxy/internal/stats"
 )
 
-const version = "0.1.2"
+const version = "0.1.3"
 
 // Type aliases so that tests (package main) can use the unqualified names.
 type Session = stats.Session
@@ -189,10 +189,10 @@ func cmdRestart() {
 
 // cmdHelp prints usage.
 func cmdHelp() {
-	fmt.Printf(`claude-context-proxy v%s
+	fmt.Printf(`ai-proxy v%s
 
 Usage:
-  claude-context-proxy [command]
+  ai-proxy [command]
 
 Daemon:
   start        Start proxy as background daemon
@@ -282,7 +282,7 @@ func runServer() {
 	if ca, key, err := cert.EnsureCA(); err == nil {
 		caCert, caKey = ca, key
 	} else {
-		log.Printf("mitm: CA not available (%v) — run 'claude-context-proxy setup' to enable HTTPS_PROXY mode", err)
+		log.Printf("mitm: CA not available (%v) — run 'ai-proxy setup' to enable HTTPS_PROXY mode", err)
 	}
 
 	onTokens := func(ti proxy.TokenInfo) {
@@ -332,7 +332,7 @@ func runServer() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("claude-context-proxy v%s listening on :%d → %s", version, cfg.Port, proxy.Upstream)
+		log.Printf("ai-proxy v%s listening on :%d → %s", version, cfg.Port, proxy.Upstream)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("server: %v", err)
 		}
@@ -409,7 +409,7 @@ func main() {
 			cmdHelp()
 			return
 		case "version", "--version", "-v":
-			fmt.Printf("claude-context-proxy v%s\n", version)
+			fmt.Printf("ai-proxy v%s\n", version)
 			return
 		case "--foreground", "-f":
 			runServer()

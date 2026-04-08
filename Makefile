@@ -1,4 +1,4 @@
-BINARY  := claude-context-proxy
+BINARY  := ai-proxy
 INSTALL := $(HOME)/.local/bin/$(BINARY)
 
 .PHONY: build run install test bench lint clean
