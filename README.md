@@ -49,15 +49,33 @@ claude
 textproxy stats
 ```
 
-### Fish alias (recommended)
+### Shell alias
 
+**Fish** — `~/.config/fish/functions/claude-ctx.fish`
 ```fish
-# ~/.config/fish/functions/claude-ctx.fish
 function claude-ctx
     set -lx HTTPS_PROXY http://localhost:7474
     set -lx NODE_EXTRA_CA_CERTS $HOME/.config/textproxy/ca.crt
     claude $argv
 end
+```
+
+**Bash** — add to `~/.bashrc`
+```bash
+claude-ctx() {
+    HTTPS_PROXY=http://localhost:7474 \
+    NODE_EXTRA_CA_CERTS="$HOME/.config/textproxy/ca.crt" \
+    claude "$@"
+}
+```
+
+**Zsh** — add to `~/.zshrc`
+```zsh
+claude-ctx() {
+    HTTPS_PROXY=http://localhost:7474 \
+    NODE_EXTRA_CA_CERTS="$HOME/.config/textproxy/ca.crt" \
+    claude "$@"
+}
 ```
 
 ## Commands
