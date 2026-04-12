@@ -1,4 +1,6 @@
-# claude-context-proxy
+# textproxy
+
+> Local proxy for Claude Code — captures token consumption stats per session
 
 Lightweight local MITM proxy between Claude Code and `api.anthropic.com`.
 Captures token usage from every API response and reports context consumption
@@ -13,16 +15,16 @@ per session, per request, and per tool call.
 ```
 claude-ctx  (fish alias)
   ↓  HTTPS_PROXY=http://localhost:7474
-  ↓  NODE_EXTRA_CA_CERTS=~/.config/claude-context-proxy/ca.crt
-claude-context-proxy daemon  (localhost:7474)
+  ↓  NODE_EXTRA_CA_CERTS=~/.config/textproxy/ca.crt
+textproxy daemon  (localhost:7474)
   ↓  MITM: terminates TLS, inspects response, re-encrypts
 api.anthropic.com
   ↓  SSE response with usage.input_tokens / cache tokens
 proxy extracts token counts + writes stats
   ↓
-~/.cache/claude-context-proxy/session.json   ← live session state
-~/.cache/claude-context-proxy/history.jsonl  ← per-request log
-~/.files/states/ctx.json                     ← statusline state (atomic write)
+~/.cache/textproxy/session.json   ← live session state
+~/.cache/textproxy/history.jsonl  ← per-request log
+~/.files/states/ctx.json          ← statusline state (atomic write)
 ```
 
 ## Quick start
@@ -32,19 +34,19 @@ proxy extracts token counts + writes stats
 make install
 
 # 2. Generate CA cert and install to macOS keychain (one-time)
-claude-context-proxy setup
+textproxy setup
 
 # 3. Start the daemon
-claude-context-proxy start
+textproxy start
 
 # 4. Run Claude Code through the proxy
 #    (add HTTPS_PROXY + NODE_EXTRA_CA_CERTS, or use the claude-ctx alias)
 HTTPS_PROXY=http://localhost:7474 \
-NODE_EXTRA_CA_CERTS=~/.config/claude-context-proxy/ca.crt \
+NODE_EXTRA_CA_CERTS=~/.config/textproxy/ca.crt \
 claude
 
 # 5. Check usage
-claude-context-proxy stats
+textproxy stats
 ```
 
 ### Fish alias (recommended)
@@ -53,7 +55,7 @@ claude-context-proxy stats
 # ~/.config/fish/functions/claude-ctx.fish
 function claude-ctx
     set -lx HTTPS_PROXY http://localhost:7474
-    set -lx NODE_EXTRA_CA_CERTS $HOME/.config/claude-context-proxy/ca.crt
+    set -lx NODE_EXTRA_CA_CERTS $HOME/.config/textproxy/ca.crt
     claude $argv
 end
 ```
@@ -91,7 +93,7 @@ Top context spikes (last 10 req):
 
 ## Configuration
 
-Config file: `~/.config/claude-context-proxy/config.json`
+Config file: `~/.config/textproxy/config.json`
 
 All fields can be overridden with environment variables:
 
@@ -120,4 +122,8 @@ make bench    # benchmarks
   since Claude Code aggressively caches tool definitions and system prompts
 - The proxy only MITMs `api.anthropic.com`; all other HTTPS traffic is
   tunnelled transparently
-- CA private key never leaves `~/.config/claude-context-proxy/ca.key` (mode 0600)
+- CA private key never leaves `~/.config/textproxy/ca.key` (mode 0600)
+
+## License
+
+[Elastic License 2.0](LICENSE)

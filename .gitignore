@@ -1,3 +1,11 @@
 .cache/
 *.jsonl
 session.json
+
+# Internal tooling — not for public release
+prompts/
+reports/
+logs/
+.files/
+pipeline.yaml
+.claude/

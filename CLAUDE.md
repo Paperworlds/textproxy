@@ -1,31 +1,24 @@
-# ai-proxy
+# textproxy
 
-Lightweight local proxy between Claude Code and api.anthropic.com.
+Lightweight local MITM proxy between Claude Code and api.anthropic.com.
 Reads token usage headers from responses and reports per-session consumption.
 
 ## What it does
 - Listens on localhost:7474, forwards all traffic to api.anthropic.com
-- Extracts x-anthropic-input-tokens / x-anthropic-output-tokens from responses
-- Writes stats to ~/.cache/ai-proxy/session.json + history.jsonl
-- CLI: `ai-proxy stats` prints a formatted summary
+- Extracts token counts from SSE responses (input, output, cache)
+- Writes stats to ~/.cache/textproxy/session.json + history.jsonl
+- CLI: `textproxy stats` prints a formatted summary
 
 ## Usage
 ```bash
-ai-proxy start
+textproxy start
 ANTHROPIC_BASE_URL=http://localhost:7474 claude
-ai-proxy stats
-```
-
-## Running prompts
-```bash
-cd /Users/projects/personal/claude-context-proxy
-pp run        # run next pending prompt
-pp status     # show all prompts
+textproxy stats
 ```
 
 ## Phases
 - Phase 1 (000): minimal proxy + stats CLI — Go, stdlib only
-- Phase 2 (001): session tracking + `ai-proxy stats` history query
+- Phase 2 (001): session tracking + `textproxy stats` history query
 - Phase 3 (002): statusline integration (fish + .files/states/ctx.json)
 - Phase 4 (003): token breakdown by tool call (nice to have)
 

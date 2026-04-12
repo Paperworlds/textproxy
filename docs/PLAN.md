@@ -1,4 +1,4 @@
-# claude-context-proxy — Project Plan
+# textproxy — Project Plan
 
 ## Purpose
 
@@ -24,12 +24,12 @@ executable with no external dependencies.
 - Streaming SSE responses forwarded chunk-by-chunk via `http.Flusher` (zero buffering)
 - Graceful shutdown: drains in-flight stats goroutines before exit
 - Daemon lifecycle: `start` (default), `stop`, `restart`, `log`
-- PID file at `~/.cache/claude-context-proxy/proxy.pid`
-- Log file at `~/.cache/claude-context-proxy/proxy.log`
+- PID file at `~/.cache/textproxy/proxy.pid`
+- Log file at `~/.cache/textproxy/proxy.log`
 
 **Stats tracking**
-- `~/.cache/claude-context-proxy/session.json` — live session state
-- `~/.cache/claude-context-proxy/history.jsonl` — one line per request
+- `~/.cache/textproxy/session.json` — live session state
+- `~/.cache/textproxy/history.jsonl` — one line per request
 - Sessions auto-reset after configurable inactivity gap (default 30 min)
 - Each history entry records: timestamp, input/output tokens, path, model, session ID, tool calls (when inspect mode is on)
 
@@ -59,7 +59,7 @@ executable with no external dependencies.
 - `stats --tools` shows per-tool call frequency for the current session
 - Zero overhead when disabled (default)
 
-**Config file** at `~/.config/claude-context-proxy/config.json`
+**Config file** at `~/.config/textproxy/config.json`
 - Port, session gap, statusline path, inspect mode, pricing, model context windows
 - All env vars (`CTX_PORT`, `CTX_MODE`, `CTX_INSPECT`, etc.) override config
 
@@ -106,19 +106,19 @@ main → cli    → stats, config
 
 ```bash
 # Start proxy (daemonizes by default)
-claude-context-proxy
+textproxy
 
 # Point Claude Code at it
 export ANTHROPIC_BASE_URL=http://localhost:7474
 
 # Check context usage
-claude-context-proxy stats
-claude-context-proxy history --last
+textproxy stats
+textproxy history --last
 
 # Lifecycle
-claude-context-proxy stop
-claude-context-proxy restart
-claude-context-proxy log
+textproxy stop
+textproxy restart
+textproxy log
 ```
 
 ---
@@ -141,7 +141,7 @@ claude-context-proxy log
    capture bug; `recordTokens` now fires correctly.
 
 ### Near term
-- **Live proxy routing debug** — `claude-context-proxy status` command to check whether
+- **Live proxy routing debug** — `textproxy status` command to check whether
   proxy is reachable and `HTTPS_PROXY` / `NODE_EXTRA_CA_CERTS` are set in the current shell.
 
 ### Phase 8 — shell integration
@@ -151,7 +151,7 @@ claude-context-proxy log
 
 ### Phase 9 — richer context analytics
 - Context window % per request shown in `history` output
-- Daily/weekly summaries: `claude-context-proxy summary --week`
+- Daily/weekly summaries: `textproxy summary --week`
 - Alert when a single request exceeds a configurable threshold (e.g. >50% of window)
 
 ### Phase 10 — multi-profile support
@@ -160,6 +160,6 @@ claude-context-proxy log
 - Per-profile stats in `sessions` output
 
 ### Future / nice-to-have
-- Web UI dashboard (local only, `claude-context-proxy serve`)
+- Web UI dashboard (local only, `textproxy serve`)
 - Export to CSV / JSON for external analysis
 - Homebrew formula for easy install
