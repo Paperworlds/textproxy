@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pdonorio/claude-context-proxy/internal/config"
-	"github.com/pdonorio/claude-context-proxy/internal/stats"
+	"textproxy/internal/config"
+	"textproxy/internal/stats"
 )
 
 // CmdStats implements the "stats" subcommand.

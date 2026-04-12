@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pdonorio/claude-context-proxy/internal/cert"
-	"github.com/pdonorio/claude-context-proxy/internal/config"
+	"textproxy/internal/cert"
+	"textproxy/internal/config"
 )
 
 // ConnectHandler returns an http.HandlerFunc that handles HTTP CONNECT tunnelling.

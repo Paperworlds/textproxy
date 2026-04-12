@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pdonorio/claude-context-proxy/internal/config"
+	"textproxy/internal/config"
 )
 
 // StatuslinePath returns the expanded path to the statusline state file.

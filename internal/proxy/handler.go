@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pdonorio/claude-context-proxy/internal/config"
+	"textproxy/internal/config"
 )
 
 // Upstream is the default Anthropic API base URL.

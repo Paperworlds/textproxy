@@ -67,7 +67,7 @@ func Dir() string {
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".config", "claude-context-proxy")
+	return filepath.Join(home, ".config", "textproxy")
 }
 
 // Path returns the config file path.

@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pdonorio/claude-context-proxy/internal/cert"
-	"github.com/pdonorio/claude-context-proxy/internal/cli"
-	"github.com/pdonorio/claude-context-proxy/internal/config"
-	"github.com/pdonorio/claude-context-proxy/internal/proxy"
-	"github.com/pdonorio/claude-context-proxy/internal/stats"
+	"textproxy/internal/cert"
+	"textproxy/internal/cli"
+	"textproxy/internal/config"
+	"textproxy/internal/proxy"
+	"textproxy/internal/stats"
 )
 
 const version = "0.1.3"
@@ -111,7 +111,7 @@ func cmdConfig(args []string)     { cli.CmdConfig(args, cfg) }
 // ── Daemon management ───────────────────────────────────────────────────────
 
 // cmdStart launches the proxy as a background daemon.
-// If _CCP_DAEMON=1 is set we are already the daemon child — run the server.
+// If _TEXTPROXY_DAEMON=1 is set we are already the daemon child — run the server.
 func cmdStart() {
 	// Check if already running.
 	if pid := stats.ReadPID(); pid != 0 {
@@ -139,7 +139,7 @@ func cmdStart() {
 	}
 
 	cmd := exec.Command(self)
-	cmd.Env = append(os.Environ(), "_CCP_DAEMON=1")
+	cmd.Env = append(os.Environ(), "_TEXTPROXY_DAEMON=1")
 	cmd.Stdout = lf
 	cmd.Stderr = lf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -189,10 +189,10 @@ func cmdRestart() {
 
 // cmdHelp prints usage.
 func cmdHelp() {
-	fmt.Printf(`ai-proxy v%s
+	fmt.Printf(`textproxy v%s
 
 Usage:
-  ai-proxy [command]
+  textproxy [command]
 
 Daemon:
   start        Start proxy as background daemon
@@ -282,7 +282,7 @@ func runServer() {
 	if ca, key, err := cert.EnsureCA(); err == nil {
 		caCert, caKey = ca, key
 	} else {
-		log.Printf("mitm: CA not available (%v) — run 'ai-proxy setup' to enable HTTPS_PROXY mode", err)
+		log.Printf("mitm: CA not available (%v) — run 'textproxy setup' to enable HTTPS_PROXY mode", err)
 	}
 
 	onTokens := func(ti proxy.TokenInfo) {
@@ -332,7 +332,7 @@ func runServer() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("ai-proxy v%s listening on :%d → %s", version, cfg.Port, proxy.Upstream)
+		log.Printf("textproxy v%s listening on :%d → %s", version, cfg.Port, proxy.Upstream)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("server: %v", err)
 		}
@@ -367,8 +367,8 @@ func main() {
 	cfg = config.Load()
 	config.EnsureFile()
 
-	// Daemon child: launched by cmdStart with _CCP_DAEMON=1 and no extra args.
-	if os.Getenv("_CCP_DAEMON") == "1" {
+	// Daemon child: launched by cmdStart with _TEXTPROXY_DAEMON=1 and no extra args.
+	if os.Getenv("_TEXTPROXY_DAEMON") == "1" {
 		runServer()
 		return
 	}
@@ -409,7 +409,7 @@ func main() {
 			cmdHelp()
 			return
 		case "version", "--version", "-v":
-			fmt.Printf("ai-proxy v%s\n", version)
+			fmt.Printf("textproxy v%s\n", version)
 			return
 		case "--foreground", "-f":
 			runServer()

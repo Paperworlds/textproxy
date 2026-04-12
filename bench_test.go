@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pdonorio/claude-context-proxy/internal/proxy"
+	"textproxy/internal/proxy"
 )
 
 // setupBench initialises a temp cache dir (with statusline disabled) and

@@ -1187,7 +1187,7 @@ func TestConfigLoad(t *testing.T) {
 	}
 
 	// Test 2: File with custom values.
-	cfgDir := filepath.Join(tmp, ".config", "claude-context-proxy")
+	cfgDir := filepath.Join(tmp, ".config", "textproxy")
 	os.MkdirAll(cfgDir, 0o755)
 	customCfg := &Config{
 		Port:              8888,

@@ -1,4 +1,4 @@
-BINARY  := ai-proxy
+BINARY  := textproxy
 INSTALL := $(HOME)/.local/bin/$(BINARY)
 
 .PHONY: build run install test bench lint clean

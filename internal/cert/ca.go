@@ -20,7 +20,7 @@ func dir() string {
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".config", "claude-context-proxy")
+	return filepath.Join(home, ".config", "textproxy")
 }
 
 // CACertPath returns the CA certificate file path.
@@ -48,8 +48,8 @@ func GenerateCA() (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	template := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName:   "claude-context-proxy CA",
-			Organization: []string{"claude-context-proxy"},
+			CommonName:   "textproxy CA",
+			Organization: []string{"textproxy"},
 		},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),

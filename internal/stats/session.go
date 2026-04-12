@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/pdonorio/claude-context-proxy/internal/config"
+	"textproxy/internal/config"
 )
 
-const cacheSubDir = ".cache/ai-proxy"
-const cacheLegacySubDir = ".cache/claude-context-proxy"
+const cacheSubDir = ".cache/textproxy"
+const cacheLegacySubDir = ".cache/ai-proxy"
 
 // CacheBase returns the directory used for session and history files.
 // Migrates from the legacy directory name on first call if needed.
