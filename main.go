@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright (c) Paperworlds contributors. All rights reserved.
+
 package main
 
 import (
