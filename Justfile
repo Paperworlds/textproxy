@@ -13,6 +13,15 @@ install: build
     codesign --sign - --force --preserve-metadata=entitlements,requirements,flags {{install}}
     @echo "Installed to {{install}}"
 
+# Install shell aliases (fish)
+install-shell:
+    #!/usr/bin/env sh
+    mkdir -p "$HOME/.config/fish/functions"
+    for f in completions/functions/*.fish; do
+        cp "$f" "$HOME/.config/fish/functions/$(basename $f)"
+        echo "Installed fish function → $HOME/.config/fish/functions/$(basename $f)"
+    done
+
 test:
     go test ./...
 
