@@ -154,23 +154,23 @@ func parseReqBody(body []byte) (sysLen, toolsLen, msgsLen, toolsCount int, toolD
 	return
 }
 
-// extractProfile resolves a profile name from the Authorization header using
-// the configured prefix-to-profile mapping. Returns empty string if no match.
-func extractProfile(cfg *config.Config, header http.Header) string {
-	auth := header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
-		return ""
+// extractProfile extracts a profile name from the URL path prefix /p/<name>/
+// and strips it from the request URI. Returns the profile name (or empty string)
+// and the cleaned path. Example: /p/work/v1/messages → "work", /v1/messages.
+func extractProfile(r *http.Request) (profile, cleanURI string) {
+	cleanURI = r.RequestURI
+	const prefix = "/p/"
+	if !strings.HasPrefix(r.URL.Path, prefix) {
+		return "", cleanURI
 	}
-	key := auth[len("Bearer "):]
-	prefixLen := 20
-	if len(key) < prefixLen {
-		prefixLen = len(key)
+	rest := r.URL.Path[len(prefix):]
+	slash := strings.IndexByte(rest, '/')
+	if slash < 0 {
+		return rest, "/"
 	}
-	prefix := key[:prefixLen]
-	if name, ok := cfg.Profiles[prefix]; ok {
-		return name
-	}
-	return ""
+	profile = rest[:slash]
+	cleanURI = rest[slash:]
+	return profile, cleanURI
 }
 
 // Handler returns an http.HandlerFunc that reverse-proxies to targetURL.
@@ -178,7 +178,8 @@ func extractProfile(cfg *config.Config, header http.Header) string {
 func Handler(targetURL string, cfg *config.Config, onTokens OnTokensFn) http.HandlerFunc {
 	client := &http.Client{Timeout: 0} // no timeout — streaming responses can be long
 	return func(w http.ResponseWriter, r *http.Request) {
-		target := targetURL + r.RequestURI
+		profile, cleanURI := extractProfile(r)
+		target := targetURL + cleanURI
 
 		// Buffer the request body to extract the model and section sizes, then replay.
 		var bodyBuf []byte
@@ -192,7 +193,6 @@ func Handler(targetURL string, cfg *config.Config, onTokens OnTokensFn) http.Han
 		}
 		model := extractModel(cfg, bodyBuf)
 		sysLen, toolsLen, msgsLen, toolsCount, toolDetails := parseReqBody(bodyBuf)
-		profile := extractProfile(cfg, r.Header)
 
 		proxyReq, err := http.NewRequest(r.Method, target, io.NopCloser(bytes.NewReader(bodyBuf)))
 		if err != nil {

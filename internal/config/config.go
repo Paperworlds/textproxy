@@ -26,7 +26,6 @@ type Config struct {
 	DefaultModel      string                `json:"default_model"`
 	Mode              string                `json:"mode"`
 	ContextWindows    map[string]int64      `json:"context_windows"`
-	Profiles          map[string]string     `json:"profiles,omitempty"`
 }
 
 // Default returns the built-in defaults.
@@ -120,9 +119,6 @@ func Load() *Config {
 			}
 			if len(fileCfg.ContextWindows) > 0 {
 				cfg.ContextWindows = fileCfg.ContextWindows
-			}
-			if len(fileCfg.Profiles) > 0 {
-				cfg.Profiles = fileCfg.Profiles
 			}
 		}
 	}
