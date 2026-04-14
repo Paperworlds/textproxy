@@ -92,7 +92,7 @@ func TestTokenHeaderExtraction(t *testing.T) {
 		io.Copy(w, resp.Body)
 
 		if inputTokens > 0 || outputTokens > 0 {
-			recordTokens(inputTokens, outputTokens, r.URL.Path, "", nil, nil)
+			recordTokens(inputTokens, outputTokens, r.URL.Path, "", "", nil, nil)
 		}
 	})
 
@@ -197,8 +197,8 @@ func TestSessionJSONWritten(t *testing.T) {
 	cleanup := withTempCache(t)
 	defer cleanup()
 
-	recordTokens(1000, 200, "/v1/messages", "", nil, nil)
-	recordTokens(500, 100, "/v1/messages", "", nil, nil)
+	recordTokens(1000, 200, "/v1/messages", "", "", nil, nil)
+	recordTokens(500, 100, "/v1/messages", "", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	data, err := os.ReadFile(sessionFile())
@@ -479,7 +479,7 @@ func buildTestProxyHandler(targetURL string) http.Handler {
 		}
 
 		if inputTokens > 0 || outputTokens > 0 {
-			recordTokens(inputTokens, outputTokens, r.URL.Path, model, nil, nil)
+			recordTokens(inputTokens, outputTokens, r.URL.Path, model, "", nil, nil)
 		}
 	})
 }
@@ -496,8 +496,8 @@ func TestSessionID(t *testing.T) {
 	cfg.SessionGapMinutes = 1
 	defer func() { cfg.SessionGapMinutes = savedGap }()
 
-	recordTokens(100, 10, "/v1/messages", "", nil, nil)
-	recordTokens(200, 20, "/v1/messages", "", nil, nil)
+	recordTokens(100, 10, "/v1/messages", "", "", nil, nil)
+	recordTokens(200, 20, "/v1/messages", "", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	hist := readHistory()
@@ -528,7 +528,7 @@ func TestSessionID(t *testing.T) {
 	mu.Unlock()
 	saveSession(stale)
 
-	recordTokens(50, 5, "/v1/messages", "", nil, nil)
+	recordTokens(50, 5, "/v1/messages", "", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	hist2 := readHistory()
@@ -718,7 +718,7 @@ func TestStatuslineWrite(t *testing.T) {
 	defer os.Unsetenv("CTX_STATUSLINE_PATH")
 	cfg = loadConfig() // Reload to pick up env var
 
-	recordTokens(284391, 18204, "/v1/messages", "", nil, nil)
+	recordTokens(284391, 18204, "/v1/messages", "", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	data, err := os.ReadFile(statePath)
@@ -761,7 +761,7 @@ func TestStatuslineAtomic(t *testing.T) {
 	defer os.Unsetenv("CTX_STATUSLINE_PATH")
 	cfg = loadConfig() // Reload to pick up env var
 
-	recordTokens(1000, 100, "/v1/messages", "", nil, nil)
+	recordTokens(1000, 100, "/v1/messages", "", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	// No .tmp file should remain.
@@ -868,7 +868,7 @@ func TestStatuslineDisabled(t *testing.T) {
 	cfg = loadConfig() // Reload to pick up env var
 
 	// Should not panic or write anything.
-	recordTokens(500, 50, "/v1/messages", "", nil, nil)
+	recordTokens(500, 50, "/v1/messages", "", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	// Verify statuslinePath returns "".
@@ -962,7 +962,7 @@ func TestSessionGapReset(t *testing.T) {
 	session = nil
 	mu.Unlock()
 
-	recordTokens(100, 10, "/v1/messages", "", nil, nil)
+	recordTokens(100, 10, "/v1/messages", "", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	data2, _ := os.ReadFile(sessionFile())
@@ -1055,7 +1055,7 @@ func TestHistoryToolField(t *testing.T) {
 	defer cleanup()
 
 	tools := []string{"Read", "Bash", "Read"}
-	recordTokens(1000, 100, "/v1/messages", "", tools, nil)
+	recordTokens(1000, 100, "/v1/messages", "", "", tools, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	hist := readHistory()
@@ -1077,7 +1077,7 @@ func TestHistoryToolFieldNil(t *testing.T) {
 	cleanup := withTempCache(t)
 	defer cleanup()
 
-	recordTokens(500, 50, "/v1/messages", "", nil, nil)
+	recordTokens(500, 50, "/v1/messages", "", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	data, err := os.ReadFile(historyFile())
@@ -1306,8 +1306,8 @@ func TestHistoryHasModel(t *testing.T) {
 	cfg = defaultConfig()
 	defer func() { cfg = origCfg }()
 
-	recordTokens(100, 50, "/v1/messages", "claude-opus-4", nil, nil)
-	recordTokens(200, 75, "/v1/messages", "claude-haiku-4", nil, nil)
+	recordTokens(100, 50, "/v1/messages", "claude-opus-4", "", nil, nil)
+	recordTokens(200, 75, "/v1/messages", "claude-haiku-4", "", nil, nil)
 	time.Sleep(20 * time.Millisecond)
 
 	hist := readHistory()

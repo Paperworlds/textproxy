@@ -79,9 +79,12 @@ func defaultConfig() *config.Config                   { return config.Default() 
 func loadConfig() *config.Config                      { return config.Load() }
 
 // recordTokens applies token counts to the current session and persists stats.
-func recordTokens(input, output int64, path, model string, tools []string, bd *stats.ContextBreakdown) {
+func recordTokens(input, output int64, path, model, profile string, tools []string, bd *stats.ContextBreakdown) {
 	mu.Lock()
 	session = stats.ApplyTokens(session, cfg, input, output)
+	if profile != "" && session.Profile == "" {
+		session.Profile = profile
+	}
 	s := session
 	mu.Unlock()
 
@@ -96,6 +99,7 @@ func recordTokens(input, output int64, path, model string, tools []string, bd *s
 		Output:    output,
 		Path:      path,
 		Model:     model,
+		Profile:   profile,
 		Tools:     tools,
 		Breakdown: bd,
 	}); err != nil {
@@ -305,13 +309,14 @@ func runServer() {
 				SystemTokens:        int64(float64(cached) * float64(ti.SystemLen) / float64(totalLen)),
 				ToolsCount:          ti.ToolsCount,
 				ToolsTokens:         int64(float64(cached) * float64(ti.ToolsLen) / float64(totalLen)),
+				ToolDetails:         ti.ToolDetails,
 				HistoryTokens:       int64(float64(cached) * float64(ti.MessagesLen) / float64(totalLen)),
 			}
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			recordTokens(ti.Input, ti.Output, ti.Path, ti.Model, ti.Tools, bd)
+			recordTokens(ti.Input, ti.Output, ti.Path, ti.Model, ti.Profile, ti.Tools, bd)
 		}()
 	}
 

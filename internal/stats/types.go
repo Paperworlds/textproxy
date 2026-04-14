@@ -10,19 +10,28 @@ type Session struct {
 	InputTokens   int64     `json:"input_tokens"`
 	OutputTokens  int64     `json:"output_tokens"`
 	LastRequestAt time.Time `json:"last_request_at"`
+	Profile       string    `json:"profile,omitempty"`
+}
+
+// ToolDetail records the name and raw byte size of a single tool definition
+// from the API request body.
+type ToolDetail struct {
+	Name  string `json:"name"`
+	Bytes int    `json:"bytes"`
 }
 
 // ContextBreakdown is a proportional estimate of where input tokens came from.
 // Proportions are calculated from request body JSON section sizes scaled to
 // actual token counts from the SSE response.
 type ContextBreakdown struct {
-	NewMsgTokens        int64 `json:"new_msg,omitempty"`
-	CacheReadTokens     int64 `json:"cache_read,omitempty"`
-	CacheCreationTokens int64 `json:"cache_creation,omitempty"`
-	SystemTokens        int64 `json:"system,omitempty"`
-	ToolsCount          int   `json:"tools_count,omitempty"`
-	ToolsTokens         int64 `json:"tools,omitempty"`
-	HistoryTokens       int64 `json:"history,omitempty"`
+	NewMsgTokens        int64        `json:"new_msg,omitempty"`
+	CacheReadTokens     int64        `json:"cache_read,omitempty"`
+	CacheCreationTokens int64        `json:"cache_creation,omitempty"`
+	SystemTokens        int64        `json:"system,omitempty"`
+	ToolsCount          int          `json:"tools_count,omitempty"`
+	ToolsTokens         int64        `json:"tools,omitempty"`
+	ToolDetails         []ToolDetail `json:"tool_details,omitempty"`
+	HistoryTokens       int64        `json:"history,omitempty"`
 }
 
 // HistoryEntry is one line in history.jsonl.
@@ -33,6 +42,7 @@ type HistoryEntry struct {
 	Output    int64             `json:"output"`
 	Path      string            `json:"path"`
 	Model     string            `json:"model,omitempty"`
+	Profile   string            `json:"profile,omitempty"`
 	Tools     []string          `json:"tools,omitempty"`
 	Breakdown *ContextBreakdown `json:"breakdown,omitempty"`
 }

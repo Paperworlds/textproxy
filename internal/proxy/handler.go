@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"textproxy/internal/config"
+	"textproxy/internal/stats"
 )
 
 // Upstream is the default Anthropic API base URL.
@@ -16,18 +17,20 @@ const Upstream = "https://api.anthropic.com"
 
 // TokenInfo carries extracted token data from a proxied request/response pair.
 type TokenInfo struct {
-	Input         int64    // total input (NewInput + CacheRead + CacheCreation)
+	Input         int64              // total input (NewInput + CacheRead + CacheCreation)
 	Output        int64
-	NewInput      int64    // input_tokens from message_start (non-cached)
-	CacheRead     int64    // cache_read_input_tokens
-	CacheCreation int64    // cache_creation_input_tokens
+	NewInput      int64              // input_tokens from message_start (non-cached)
+	CacheRead     int64              // cache_read_input_tokens
+	CacheCreation int64              // cache_creation_input_tokens
 	Path          string
 	Model         string
-	Tools         []string // tool names (CTX_INSPECT=1 only)
-	SystemLen     int      // byte length of "system" field in request body
-	ToolsCount    int      // number of tool definitions
-	ToolsLen      int      // total byte length of tools array
-	MessagesLen   int      // total byte length of messages array
+	Profile       string             // resolved profile name from Authorization header
+	Tools         []string           // tool names (CTX_INSPECT=1 only)
+	ToolDetails   []stats.ToolDetail // per-tool name + byte size from request body
+	SystemLen     int                // byte length of "system" field in request body
+	ToolsCount    int                // number of tool definitions
+	ToolsLen      int                // total byte length of tools array
+	MessagesLen   int                // total byte length of messages array
 }
 
 // OnTokensFn is called after each response with extracted token data.
@@ -124,7 +127,7 @@ func (s *SSEInspector) parseEvent(raw []byte) {
 
 // parseReqBody extracts byte lengths of the system, tools, and messages sections
 // from a JSON request body. Returns zero values if the body cannot be parsed.
-func parseReqBody(body []byte) (sysLen, toolsLen, msgsLen, toolsCount int) {
+func parseReqBody(body []byte) (sysLen, toolsLen, msgsLen, toolsCount int, toolDetails []stats.ToolDetail) {
 	var req struct {
 		System   json.RawMessage   `json:"system"`
 		Tools    []json.RawMessage `json:"tools"`
@@ -135,13 +138,39 @@ func parseReqBody(body []byte) (sysLen, toolsLen, msgsLen, toolsCount int) {
 	}
 	sysLen = len(req.System)
 	toolsCount = len(req.Tools)
+	toolDetails = make([]stats.ToolDetail, 0, toolsCount)
 	for _, t := range req.Tools {
 		toolsLen += len(t)
+		var nameOnly struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(t, &nameOnly) == nil {
+			toolDetails = append(toolDetails, stats.ToolDetail{Name: nameOnly.Name, Bytes: len(t)})
+		}
 	}
 	for _, m := range req.Messages {
 		msgsLen += len(m)
 	}
 	return
+}
+
+// extractProfile resolves a profile name from the Authorization header using
+// the configured prefix-to-profile mapping. Returns empty string if no match.
+func extractProfile(cfg *config.Config, header http.Header) string {
+	auth := header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return ""
+	}
+	key := auth[len("Bearer "):]
+	prefixLen := 20
+	if len(key) < prefixLen {
+		prefixLen = len(key)
+	}
+	prefix := key[:prefixLen]
+	if name, ok := cfg.Profiles[prefix]; ok {
+		return name
+	}
+	return ""
 }
 
 // Handler returns an http.HandlerFunc that reverse-proxies to targetURL.
@@ -162,7 +191,8 @@ func Handler(targetURL string, cfg *config.Config, onTokens OnTokensFn) http.Han
 			}
 		}
 		model := extractModel(cfg, bodyBuf)
-		sysLen, toolsLen, msgsLen, toolsCount := parseReqBody(bodyBuf)
+		sysLen, toolsLen, msgsLen, toolsCount, toolDetails := parseReqBody(bodyBuf)
+		profile := extractProfile(cfg, r.Header)
 
 		proxyReq, err := http.NewRequest(r.Method, target, io.NopCloser(bytes.NewReader(bodyBuf)))
 		if err != nil {
@@ -229,6 +259,8 @@ func Handler(targetURL string, cfg *config.Config, onTokens OnTokensFn) http.Han
 		ti := TokenInfo{
 			Path:        r.URL.Path,
 			Model:       model,
+			Profile:     profile,
+			ToolDetails: toolDetails,
 			SystemLen:   sysLen,
 			ToolsCount:  toolsCount,
 			ToolsLen:    toolsLen,
