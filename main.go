@@ -25,7 +25,16 @@ import (
 	"textproxy/internal/stats"
 )
 
-const version = "0.1.4"
+// Version and GitHash are injected at build time via ldflags.
+var Version = "0.2.0"
+var GitHash = ""
+
+func versionString() string {
+	if GitHash != "" {
+		return Version + " (" + GitHash + ")"
+	}
+	return Version
+}
 
 // Type aliases so that tests (package main) can use the unqualified names.
 type Session = stats.Session
@@ -159,6 +168,21 @@ func cmdStart() {
 	fmt.Printf("proxy started (pid %d) — logs: %s\n", cmd.Process.Pid, logPath)
 }
 
+// cmdStatus prints a one-line proxy status (running / stopped).
+func cmdStatus() {
+	pid := stats.ReadPID()
+	if pid == 0 {
+		fmt.Printf("stopped  (no pid file)\n")
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil || proc.Signal(syscall.Signal(0)) != nil {
+		fmt.Printf("stopped  (pid %d — not running)\n", pid)
+		return
+	}
+	fmt.Printf("running  pid=%d  port=%d  version=%s\n", pid, cfg.Port, Version)
+}
+
 // cmdStop sends SIGTERM to the running proxy.
 func cmdStop() {
 	pid := stats.ReadPID()
@@ -197,7 +221,7 @@ func cmdRestart() {
 
 // cmdHelp prints usage.
 func cmdHelp() {
-	fmt.Printf(`textproxy v%s
+	fmt.Printf(`textproxy, version %s
 
 Usage:
   textproxy [command]
@@ -206,6 +230,7 @@ Daemon:
   start        Start proxy as background daemon
   stop         Stop the running daemon
   restart      Stop and restart the daemon
+  status       Show running state (pid, port, version)
   log          Tail the daemon log (-f to follow)
   os           Show OS integration status (launchd agent)
   os install   Install launchd agent — auto-start on login, restart on kill
@@ -222,7 +247,7 @@ Stats:
 Config:
   config       Show effective config (--path for file location)
   version      Print version
-`, version)
+`, versionString())
 }
 
 // cmdSetup generates the CA certificate (if needed) and installs it into the
@@ -344,7 +369,7 @@ func runServer() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("textproxy v%s listening on :%d → %s", version, cfg.Port, proxy.Upstream)
+		log.Printf("textproxy v%s listening on :%d → %s", Version, cfg.Port, proxy.Upstream)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("server: %v", err)
 		}
@@ -390,6 +415,9 @@ func main() {
 		case "start":
 			cmdStart()
 			return
+		case "status":
+			cmdStatus()
+			return
 		case "stop":
 			cmdStop()
 			return
@@ -424,7 +452,7 @@ func main() {
 			cmdHelp()
 			return
 		case "version", "--version", "-v":
-			fmt.Printf("textproxy v%s\n", version)
+			fmt.Printf("textproxy, version %s\n", versionString())
 			return
 		case "--foreground", "-f":
 			runServer()
