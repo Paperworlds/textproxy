@@ -25,7 +25,7 @@ import (
 	"textproxy/internal/stats"
 )
 
-const version = "0.1.3"
+const version = "0.1.4"
 
 // Type aliases so that tests (package main) can use the unqualified names.
 type Session = stats.Session
