@@ -92,7 +92,37 @@ claude-ctx() {
 | `history` | Per-request log (`--last`, `--today`, `--since=DATE`) |
 | `statusline` | Compact one-liner for shell prompt embedding |
 | `config` | Show effective config |
+| `os` | Show OS integration status (launchd agent) |
+| `os install` | Install launchd agent — auto-start on login, restart if killed |
+| `os uninstall` | Remove launchd agent |
 | `version` | Print version |
+
+## Auto-restart with launchd (recommended)
+
+By default `textproxy start` runs a plain background daemon — if the process
+is killed it stays dead. For a more resilient setup, hand it over to launchd:
+
+```bash
+textproxy os install
+```
+
+This writes a plist to `~/Library/LaunchAgents/com.paperworlds.textproxy.plist`
+and loads it. launchd will then:
+
+- Start textproxy automatically at login
+- Restart it within ~1 second if it is killed for any reason
+
+```bash
+textproxy os          # show current status
+textproxy os install  # install / re-install (e.g. after moving the binary)
+textproxy os uninstall # remove and stop
+```
+
+> **macOS background activity notification** — after `os install` macOS may
+> show a notification saying textproxy can run in the background. This is
+> expected. You can manage it in **System Settings → General → Login Items &
+> Extensions**. The proxy runs entirely locally; no data leaves your machine
+> except the API calls it forwards to `api.anthropic.com`.
 
 ## Stats output
 
