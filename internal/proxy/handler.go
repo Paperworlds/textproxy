@@ -169,7 +169,12 @@ func extractProfile(r *http.Request) (profile, cleanURI string) {
 		return rest, "/"
 	}
 	profile = rest[:slash]
-	cleanURI = rest[slash:]
+	pathAfterProfile := rest[slash:]
+	if r.URL.RawQuery != "" {
+		cleanURI = pathAfterProfile + "?" + r.URL.RawQuery
+	} else {
+		cleanURI = pathAfterProfile
+	}
 	return profile, cleanURI
 }
 
