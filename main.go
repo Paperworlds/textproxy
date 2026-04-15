@@ -25,17 +25,6 @@ import (
 	"textproxy/internal/stats"
 )
 
-// Version and GitHash are injected at build time via ldflags.
-var Version = "0.2.0"
-var GitHash = ""
-
-func versionString() string {
-	if GitHash != "" {
-		return Version + " (" + GitHash + ")"
-	}
-	return Version
-}
-
 // Type aliases so that tests (package main) can use the unqualified names.
 type Session = stats.Session
 type HistoryEntry = stats.HistoryEntry

@@ -18,11 +18,35 @@ import (
 func CmdStats(args []string, cfg *config.Config) {
 	fs := flag.NewFlagSet("stats", flag.ExitOnError)
 	showTools := fs.Bool("tools", false, "show tool call frequency table")
+	jsonOut := fs.Bool("json", false, "print stats as JSON (for tw stats)")
 	_ = fs.Parse(args)
 
 	s := stats.LoadSession()
 	if s == nil {
-		fmt.Println("No session data found. Start the proxy and make some requests.")
+		if *jsonOut {
+			fmt.Println(`{"tokens":0,"cost":0,"session_count":0,"active_sessions":0,"sessions":{}}`)
+		} else {
+			fmt.Println("No session data found. Start the proxy and make some requests.")
+		}
+		return
+	}
+
+	if *jsonOut {
+		cost := stats.CostUSD(cfg, cfg.DefaultModel, s.InputTokens, s.OutputTokens)
+		out := map[string]any{
+			"tokens":          s.InputTokens,
+			"cost":            cost,
+			"session_count":   1,
+			"active_sessions": 1,
+			"sessions": map[string]any{
+				s.SessionID: map[string]any{
+					"tokens": s.InputTokens,
+					"cost":   cost,
+				},
+			},
+		}
+		data, _ := json.Marshal(out)
+		fmt.Println(string(data))
 		return
 	}
 
