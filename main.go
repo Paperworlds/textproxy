@@ -114,6 +114,7 @@ func cmdSessions()                { cli.CmdSessions(cfg) }
 func cmdHistory(args []string)    { cli.CmdHistory(args) }
 func cmdStatusline(args []string) { cli.CmdStatusline(args, cfg) }
 func cmdConfig(args []string)     { cli.CmdConfig(args, cfg) }
+func cmdOS(args []string)         { cli.CmdOS(args) }
 
 // ── Daemon management ───────────────────────────────────────────────────────
 
@@ -206,6 +207,9 @@ Daemon:
   stop         Stop the running daemon
   restart      Stop and restart the daemon
   log          Tail the daemon log (-f to follow)
+  os           Show OS integration status (launchd agent)
+  os install   Install launchd agent — auto-start on login, restart on kill
+  os uninstall Remove launchd agent
   setup        Generate CA cert and install to keychain (for HTTPS_PROXY mode)
   -f           Run in foreground
 
@@ -406,6 +410,9 @@ func main() {
 			return
 		case "config":
 			cmdConfig(os.Args[2:])
+			return
+		case "os":
+			cmdOS(os.Args[2:])
 			return
 		case "setup":
 			cmdSetup()
