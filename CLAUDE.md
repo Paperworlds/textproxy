@@ -28,3 +28,6 @@ Do not use `--no-gpg-sign` flag — the config already handles it.
 
 ## Language
 Go — single binary, no deps, fast startup.
+
+## Forums
+Before starting work, run `textforums list --tag textproxy --status open` and check for open threads relevant to your task. Post a thread tagged `textproxy` if you hit a cross-repo blocker.
