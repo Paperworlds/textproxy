@@ -329,6 +329,7 @@ func runServer() {
 				ToolsTokens:         int64(float64(cached) * float64(ti.ToolsLen) / float64(totalLen)),
 				ToolDetails:         ti.ToolDetails,
 				HistoryTokens:       int64(float64(cached) * float64(ti.MessagesLen) / float64(totalLen)),
+				ToolResultDetails:   ti.ToolResultDetails,
 			}
 		}
 		wg.Add(1)

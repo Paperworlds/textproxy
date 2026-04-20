@@ -32,6 +32,7 @@ type ContextBreakdown struct {
 	ToolsTokens         int64        `json:"tools,omitempty"`
 	ToolDetails         []ToolDetail `json:"tool_details,omitempty"`
 	HistoryTokens       int64        `json:"history,omitempty"`
+	ToolResultDetails   []ToolDetail `json:"tool_results,omitempty"`
 }
 
 // HistoryEntry is one line in history.jsonl.

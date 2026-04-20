@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -25,12 +26,13 @@ type TokenInfo struct {
 	Path          string
 	Model         string
 	Profile       string             // resolved profile name from Authorization header
-	Tools         []string           // tool names (CTX_INSPECT=1 only)
-	ToolDetails   []stats.ToolDetail // per-tool name + byte size from request body
-	SystemLen     int                // byte length of "system" field in request body
-	ToolsCount    int                // number of tool definitions
-	ToolsLen      int                // total byte length of tools array
-	MessagesLen   int                // total byte length of messages array
+	Tools             []string           // tool names (CTX_INSPECT=1 only)
+	ToolDetails       []stats.ToolDetail // per-tool name + byte size from request body
+	ToolResultDetails []stats.ToolDetail // per-tool name + total byte size of their results in history
+	SystemLen         int                // byte length of "system" field in request body
+	ToolsCount        int                // number of tool definitions
+	ToolsLen          int                // total byte length of tools array
+	MessagesLen       int                // total byte length of messages array
 }
 
 // OnTokensFn is called after each response with extracted token data.
@@ -126,8 +128,9 @@ func (s *SSEInspector) parseEvent(raw []byte) {
 }
 
 // parseReqBody extracts byte lengths of the system, tools, and messages sections
-// from a JSON request body. Returns zero values if the body cannot be parsed.
-func parseReqBody(body []byte) (sysLen, toolsLen, msgsLen, toolsCount int, toolDetails []stats.ToolDetail) {
+// from a JSON request body. Also links tool_use blocks to their tool_result
+// responses to report per-tool result sizes. Returns zero values if unparseable.
+func parseReqBody(body []byte) (sysLen, toolsLen, msgsLen, toolsCount int, toolDetails, toolResultDetails []stats.ToolDetail) {
 	var req struct {
 		System   json.RawMessage   `json:"system"`
 		Tools    []json.RawMessage `json:"tools"`
@@ -148,9 +151,56 @@ func parseReqBody(body []byte) (sysLen, toolsLen, msgsLen, toolsCount int, toolD
 			toolDetails = append(toolDetails, stats.ToolDetail{Name: nameOnly.Name, Bytes: len(t)})
 		}
 	}
-	for _, m := range req.Messages {
-		msgsLen += len(m)
+
+	// Parse messages: build tool_use_id→name map, then sum tool_result bytes per tool.
+	type contentBlock struct {
+		Type      string          `json:"type"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		ToolUseID string          `json:"tool_use_id"`
+		Content   json.RawMessage `json:"content"`
 	}
+	type message struct {
+		Content json.RawMessage `json:"content"`
+	}
+	toolUseNames := map[string]string{}
+	toolResultBytes := map[string]int{}
+	for _, rawMsg := range req.Messages {
+		msgsLen += len(rawMsg)
+		var msg message
+		if json.Unmarshal(rawMsg, &msg) != nil {
+			continue
+		}
+		var blocks []json.RawMessage
+		if json.Unmarshal(msg.Content, &blocks) != nil {
+			continue // plain string content, not a block array
+		}
+		for _, rawBlock := range blocks {
+			var b contentBlock
+			if json.Unmarshal(rawBlock, &b) != nil {
+				continue
+			}
+			switch b.Type {
+			case "tool_use":
+				if b.ID != "" && b.Name != "" {
+					toolUseNames[b.ID] = b.Name
+				}
+			case "tool_result":
+				name := toolUseNames[b.ToolUseID]
+				if name == "" {
+					name = "unknown"
+				}
+				toolResultBytes[name] += len(rawBlock)
+			}
+		}
+	}
+	toolResultDetails = make([]stats.ToolDetail, 0, len(toolResultBytes))
+	for name, n := range toolResultBytes {
+		toolResultDetails = append(toolResultDetails, stats.ToolDetail{Name: name, Bytes: n})
+	}
+	sort.Slice(toolResultDetails, func(i, j int) bool {
+		return toolResultDetails[i].Bytes > toolResultDetails[j].Bytes
+	})
 	return
 }
 
@@ -197,7 +247,7 @@ func Handler(targetURL string, cfg *config.Config, onTokens OnTokensFn) http.Han
 			}
 		}
 		model := extractModel(cfg, bodyBuf)
-		sysLen, toolsLen, msgsLen, toolsCount, toolDetails := parseReqBody(bodyBuf)
+		sysLen, toolsLen, msgsLen, toolsCount, toolDetails, toolResultDetails := parseReqBody(bodyBuf)
 
 		proxyReq, err := http.NewRequest(r.Method, target, io.NopCloser(bytes.NewReader(bodyBuf)))
 		if err != nil {
@@ -262,14 +312,15 @@ func Handler(targetURL string, cfg *config.Config, onTokens OnTokensFn) http.Han
 		// Build TokenInfo, preferring SSE-parsed totals (include cache tokens) over
 		// header counts — headers only report the tiny raw input_tokens value.
 		ti := TokenInfo{
-			Path:        r.URL.Path,
-			Model:       model,
-			Profile:     profile,
-			ToolDetails: toolDetails,
-			SystemLen:   sysLen,
-			ToolsCount:  toolsCount,
-			ToolsLen:    toolsLen,
-			MessagesLen: msgsLen,
+			Path:              r.URL.Path,
+			Model:             model,
+			Profile:           profile,
+			ToolDetails:       toolDetails,
+			ToolResultDetails: toolResultDetails,
+			SystemLen:         sysLen,
+			ToolsCount:        toolsCount,
+			ToolsLen:          toolsLen,
+			MessagesLen:       msgsLen,
 		}
 		if inspector != nil && (inspector.InputTokens > 0 || inspector.OutputTokens > 0) {
 			ti.Input = inspector.InputTokens
