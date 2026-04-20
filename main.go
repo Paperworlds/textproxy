@@ -189,23 +189,22 @@ func cmdStop() {
 	fmt.Printf("proxy stopped (pid %d)\n", pid)
 }
 
-// cmdRestart stops the running proxy and starts a new daemon.
+// cmdRestart sends SIGUSR1 to trigger a graceful in-place restart.
+// The running process drains active connections, then exec()s the new binary.
 func cmdRestart() {
 	pid := stats.ReadPID()
-	if pid != 0 {
-		if proc, err := os.FindProcess(pid); err == nil {
-			_ = proc.Signal(syscall.SIGTERM)
-			fmt.Printf("restart: sent SIGTERM to pid %d\n", pid)
-			// Wait up to 3 s for old process to exit.
-			for i := 0; i < 30; i++ {
-				time.Sleep(100 * time.Millisecond)
-				if stats.ReadPID() == 0 {
-					break
-				}
-			}
-		}
+	if pid == 0 {
+		fmt.Fprintln(os.Stderr, "restart: proxy not running (no pid file)")
+		os.Exit(1)
 	}
-	cmdStart()
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		log.Fatalf("restart: find process %d: %v", pid, err)
+	}
+	if err := proc.Signal(syscall.SIGUSR1); err != nil {
+		log.Fatalf("restart: signal %d: %v", pid, err)
+	}
+	fmt.Printf("restart: sent SIGUSR1 to pid %d — draining then re-execing\n", pid)
 }
 
 // cmdHelp prints usage.
@@ -356,7 +355,9 @@ func runServer() {
 	}
 
 	stop := make(chan os.Signal, 1)
+	restart := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(restart, syscall.SIGUSR1)
 
 	go func() {
 		log.Printf("textproxy v%s listening on :%d → %s", Version, cfg.Port, proxy.Upstream)
@@ -365,26 +366,36 @@ func runServer() {
 		}
 	}()
 
-	<-stop
-	log.Println("shutting down...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("http shutdown: %v", err)
+	gracefulShutdown := func(timeout time.Duration) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("http shutdown: %v", err)
+		}
+		done := make(chan struct{})
+		go func() { wg.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			log.Println("flush timeout: some stats may not have been written")
+		}
 	}
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
 	select {
-	case <-done:
-		log.Println("all stats flushed")
-	case <-ctx.Done():
-		log.Println("flush timeout: some stats may not have been written")
+	case <-stop:
+		log.Println("shutting down...")
+		gracefulShutdown(5 * time.Second)
+	case <-restart:
+		log.Println("graceful restart: draining connections (up to 30s)...")
+		gracefulShutdown(30 * time.Second)
+		self, err := os.Executable()
+		if err != nil {
+			log.Fatalf("restart: could not find executable: %v", err)
+		}
+		log.Println("exec:", self)
+		if err := syscall.Exec(self, os.Args, os.Environ()); err != nil {
+			log.Fatalf("restart: exec failed: %v", err)
+		}
 	}
 }
 
