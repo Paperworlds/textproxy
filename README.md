@@ -1,6 +1,6 @@
 # textproxy
 
-> Local proxy for Claude Code — captures token consumption stats per session
+> Local proxy for Claude Code — token observability today, response cache tomorrow.
 
 Lightweight local MITM proxy between Claude Code and `api.anthropic.com`.
 Captures token usage from every API response and reports context consumption
@@ -9,6 +9,22 @@ in real time — without modifying Claude Code's behaviour.
 Designed for **subscription users** (Claude Team, Claude.ai) who don't pay
 per token but want to understand how much context window they're consuming
 per session, per request, and per tool call.
+
+## Why a proxy
+
+The proxy is the right seat for **everything that wants to observe or shape
+the API conversation**. Today that's just token observability. The roadmap is
+broader:
+
+- **Response caching** — identical prompts return cached answers. Agentic
+  loops that re-ask the same question (especially in DAG retries and
+  multi-shot evaluators) stop paying twice for the same work.
+- **Request rewriting / policy** — strip secrets, redact paths, enforce
+  per-session budgets at the wire.
+- **Cross-vendor adapters** — once an open agent spec stabilises (A2A and
+  friends), the proxy is the natural place to translate.
+
+If it crosses the wire, it can live here. The MITM cert is the leverage.
 
 ## How it works
 
