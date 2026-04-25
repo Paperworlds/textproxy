@@ -26,6 +26,17 @@ broader:
 
 If it crosses the wire, it can live here. The MITM cert is the leverage.
 
+### Pairs with RTK
+
+textproxy is the **output side** of the token economy. The **input side** is
+[RTK](https://github.com/snichols/rtk) — a CLI proxy that compresses tool
+output (`ls`, `tree`, `git`, `gh`, `find`, …) before it reaches the LLM.
+Same goal — fewer tokens crossing the boundary — different end of the pipe.
+
+Install RTK separately (`brew install rtk`). textworkspace will pick it up and
+register it. Together they cover both directions of the conversation between
+agent and model.
+
 ## How it works
 
 ```
