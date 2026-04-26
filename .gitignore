@@ -9,3 +9,4 @@ logs/
 .files/
 pipeline.yaml
 .claude/
+.memsearch/
